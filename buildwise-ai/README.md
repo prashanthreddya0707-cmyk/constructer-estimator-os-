@@ -142,7 +142,7 @@ cd backend  && uvicorn app.main:app --host 0.0.0.0 --port 8000   # behind a reve
 
 | Symptom | Fix |
 |---|---|
-| "Cannot reach the BuildWise AI server" | Backend not running or wrong port. Start `scripts/dev-backend.sh`; check `curl localhost:8000/api/health` |
+| "Cannot reach the BuildWise AI server" | Backend not running or wrong port. Start the backend (`scripts/dev-backend.sh`, or on Windows `cd backend; .venv\Scripts\activate; uvicorn app.main:app --port 8000`); check http://127.0.0.1:8000/api/health. A "Request failed (502)" in the UI means the dev proxy could not reach it |
 | `ModuleNotFoundError` when starting the backend | Activate the venv and `pip install -r requirements.txt` |
 | 401 / redirected to login | Token expired or `JWT_SECRET` changed; log in again |
 | Blank 3D area | WebGL disabled/unsupported; enable hardware acceleration. The rest of the app still works |

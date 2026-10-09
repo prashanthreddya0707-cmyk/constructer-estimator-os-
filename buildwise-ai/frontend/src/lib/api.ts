@@ -37,6 +37,7 @@ async function raw(path: string, init: RequestInit = {}): Promise<Response> {
   }
   if (!res.ok) {
     let msg = `Request failed (${res.status}).`
+    if ([502, 503, 504].includes(res.status)) msg = 'The BuildWise AI backend is not reachable. Start it (uvicorn app.main:app --port 8000 in the backend folder) and try again.'
     try {
       const body = await res.json()
       msg = body?.error?.message ?? body?.detail ?? msg

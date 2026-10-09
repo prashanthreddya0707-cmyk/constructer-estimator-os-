@@ -10,7 +10,7 @@ export default defineConfig({
   server: {
     port: 5173,
     // Dev proxy so the browser talks to a single origin (no CORS setup needed locally).
-    proxy: { '/api': { target: process.env.BACKEND_URL ?? 'http://localhost:8000', changeOrigin: true } },
+    proxy: { '/api': { target: process.env.BACKEND_URL ?? 'http://127.0.0.1:8000', changeOrigin: true } },
   },
   build: { chunkSizeWarningLimit: 1500 },
 })
