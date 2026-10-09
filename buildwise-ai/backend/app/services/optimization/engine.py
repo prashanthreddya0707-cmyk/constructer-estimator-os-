@@ -79,12 +79,24 @@ def rule_missing_rooms(ctx):
         )
 
 
+def _warning_title(w: str) -> str:
+    if "cover only" in w:
+        return "Rooms cover only part of the floor area"
+    if "exceed the floor area" in w:
+        return "Room areas exceed the floor area"
+    if "Opening areas" in w:
+        return "Door and window sizes look too large"
+    if "Built-up area was entered manually" in w:
+        return "Manual built-up area differs from length × width"
+    return "Review input dimensions"
+
+
 def rule_warnings(ctx):
     for i, w in enumerate(ctx.warnings):
         if "No rooms configured" in w or "No doors or windows" in w:
             continue  # covered by dedicated rules
         yield Recommendation(
-            f"data-quality-{i}", "Review input dimensions", w, None,
+            f"data-quality-{i}", _warning_title(w), w, None,
             "Inconsistent inputs reduce estimate reliability.",
             "Re-check the room and building dimensions against the drawings.", "More reliable quantities (not quantified).", None, "warning",
         )
