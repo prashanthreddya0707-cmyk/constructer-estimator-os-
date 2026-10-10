@@ -1,4 +1,4 @@
-import { Eye, EyeOff, Home, LayoutGrid, Lock, Pencil, RotateCcw, Ruler, Save, Square, Tag } from 'lucide-react'
+import { Eye, EyeOff, Home, LayoutGrid, Lock, Pencil, RotateCcw, Ruler, Save, Sofa, Square, Tag } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ProjectScope } from '@/components/ProjectScope'
@@ -41,7 +41,8 @@ function StudioBody({ projectId }: { projectId: string }) {
   const [view, setView] = useState<ViewMode>('exterior')
   const [floor, setFloor] = useState<'all' | number>('all')
   const [showLabels, setShowLabels] = useState(true)
-  const [showRoof, setShowRoof] = useState(true)
+  const [showRoof, setShowRoof] = useState(false) // roofless dollhouse by default
+  const [showFurniture, setShowFurniture] = useState(true)
   const [wireframe, setWireframe] = useState(false)
   const [nonce, setNonce] = useState(0)
   const [selected, setSelected] = useState<string | null>(null)
@@ -88,6 +89,7 @@ function StudioBody({ projectId }: { projectId: string }) {
           </Select>
           <ToggleBtn on={showLabels} onClick={() => setShowLabels((v) => !v)} icon={<Tag className="h-3.5 w-3.5" />}>Labels</ToggleBtn>
           <ToggleBtn on={showRoof} onClick={() => setShowRoof((v) => !v)} icon={showRoof ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}>Roof</ToggleBtn>
+          <ToggleBtn on={showFurniture} onClick={() => setShowFurniture((v) => !v)} icon={<Sofa className="h-3.5 w-3.5" />}>Furniture</ToggleBtn>
           <ToggleBtn on={wireframe} onClick={() => setWireframe((v) => !v)} icon={<LayoutGrid className="h-3.5 w-3.5" />}>Wireframe</ToggleBtn>
         </div>
 
@@ -96,7 +98,7 @@ function StudioBody({ projectId }: { projectId: string }) {
             {model.ok ? (
               <ErrorBoundary label="The 3D viewer" resetKey={model.length + model.width}>
                 <BuildingViewer model={model} selectedId={selected} onSelect={setSelected}
-                  opts={{ view, floor, showLabels, showRoof, wireframe, resetNonce: nonce }} />
+                  opts={{ view, floor, showLabels, showRoof, showFurniture, wireframe, resetNonce: nonce }} />
               </ErrorBoundary>
             ) : (
               <div className="flex h-full items-center justify-center p-6"><Alert tone="error" title="3D model cannot be generated">{model.errors.join(' ')} <button className="underline" onClick={() => setEditBuilding(true)}>Fix dimensions</button></Alert></div>

@@ -12,11 +12,13 @@ from app.services.estimate_service import compute_estimate, save_estimate
 
 router = APIRouter(tags=["dashboard"])
 
+# (name, type, length, width, floor, doors, windows, pos_x, pos_y): rooms tile each 10 x 8 m floor exactly.
 DEMO_ROOMS = [
-    ("Living Room", "living", 5.0, 4.0, 1, 2, 2, 1.0, 0.0), ("Master Bedroom", "bedroom", 4.0, 3.5, 1, 1, 2, 5.0, 0.0),
-    ("Kitchen", "kitchen", 3.0, 3.0, 1, 1, 1, 0.0, 4.0), ("Bathroom", "bathroom", 2.0, 1.5, 1, 1, 1, 3.0, 4.0),
-    ("Bedroom 2", "bedroom", 4.0, 3.0, 2, 1, 2, 0.0, 0.0), ("Study", "study", 3.0, 3.0, 2, 1, 1, 4.0, 0.0),
-    ("Bathroom 2", "bathroom", 2.0, 1.5, 2, 1, 1, 7.0, 0.0),
+    ("Living Room", "living", 5.0, 4.0, 1, 2, 2, 0.0, 0.0), ("Kitchen", "kitchen", 5.0, 4.0, 1, 1, 2, 5.0, 0.0),
+    ("Master Bedroom", "bedroom", 5.0, 4.0, 1, 1, 2, 0.0, 4.0), ("Bathroom", "bathroom", 2.5, 4.0, 1, 1, 0, 5.0, 4.0),
+    ("Store", "store", 2.5, 4.0, 1, 1, 1, 7.5, 4.0),
+    ("Bedroom 2", "bedroom", 5.0, 4.0, 2, 1, 2, 0.0, 0.0), ("Study", "study", 5.0, 4.0, 2, 1, 2, 5.0, 0.0),
+    ("Bathroom 2", "bathroom", 2.5, 4.0, 2, 1, 1, 0.0, 4.0), ("Landing", "corridor", 7.5, 4.0, 2, 1, 1, 2.5, 4.0),
 ]
 
 

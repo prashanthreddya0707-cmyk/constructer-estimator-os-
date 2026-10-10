@@ -19,7 +19,7 @@ It runs entirely locally: no paid services, no external AI APIs, no cloud creden
 | Auth & ownership | Sign-up / login, scrypt password hashing, signed expiring JWTs, protected routes, server-side ownership checks on every project, room, estimate, floor plan, price and report (other users' IDs return 404) |
 | Projects | 5-step wizard (details → dimensions → rooms → floor plan → review), validation, multi-room/multi-floor, manual area override, edit/delete, project history |
 | Floor plans | JPG/JPEG/PNG/PDF upload with type, size and content-signature validation; preview; replace/remove; files stored on disk (not in DB); click-two-points **scale calibration** and distance measuring; optional OpenCV edges/contours overlay |
-| 3D Studio | React Three Fiber model from saved data: slabs, exterior walls, interior partitions, rooms, multiple floors, door/window markers, room labels, dimension labels; orbit/zoom/pan, reset, exterior and top-down plan views, floor selection, room selection + info/edit panel, labels/roof/wireframe toggles; live regeneration after edits; schematic layout is explicitly labelled |
+| 3D Studio | React Three Fiber model generated **only from the saved rooms**: shared partitions merged and joined face-to-face (no overlapping wall volumes), real door/window openings cut into the walls (hinged door leaves, framed glazed windows), wood/tile/concrete floors, soft shadows, optional decorative furniture that never blocks doors, roofless dollhouse view with the camera-facing exterior walls cut away, optional gable roof, fitted isometric camera, top-down plan, floor selection, room selection synced with the side panel, labels/roof/furniture/wireframe toggles; live regeneration after edits; schematic layout is explicitly labelled |
 | Estimation | Cement, steel, concrete, bricks, blocks, mortar, sand, aggregates, tiles, paint, plaster. Each line shows net qty, wastage %, qty incl. wastage, unit, unit price, cost, formula and assumptions. Editable assumptions and per-material wastage |
 | Pricing & catalogue | Catalogue with brand/grade/spec/supplier/location/date; CRUD for custom materials and price records; CSV import; per-user price overrides of sample data; material selection per project |
 | Cost analysis | Totals, category pie + material bar charts (Recharts), cost per m² and per sq ft, budget variance, optional labour/transport/contingency/other (counted only when enabled **and** populated), alternative-material scenarios |
@@ -155,7 +155,8 @@ cd backend  && uvicorn app.main:app --host 0.0.0.0 --port 8000   # behind a reve
 
 * Floor-plan scale calibration works on images only (PDFs can be previewed but not calibrated); no automatic room/dimension extraction.
 * Rooms without stored positions use a schematic shelf-packing layout; positions can be saved from the Studio or set per room.
-* Doors/windows in 3D are visual markers over the wall, not boolean cut-outs.
+* The database stores room rectangles plus door/window **counts** only. Door and window positions are derived deterministically from the room edges (doors on walls shared with a neighbouring room, windows on exterior walls); exact positions are not user-editable yet. Windows that cannot be placed (e.g. a room with no exterior wall) are reported, never faked.
+* Overlapping saved rooms are drawn as saved and a warning is shown; the 3D view does not silently "fix" your plan.
 * Columns, beams and footings are not detailed; use the *frame concrete allowance* assumption and have an engineer design them.
 * No Alembic migrations, e-mail verification, password reset or rate limiting (see Authentication).
 * Dashboard "material quantities" combine different units on one chart (tooltips show units).
