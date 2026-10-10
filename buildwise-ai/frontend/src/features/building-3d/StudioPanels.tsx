@@ -8,13 +8,19 @@ import { cn } from '@/lib/utils'
 import { FURNITURE_SPECS, typesForRoom, type FurnitureItem } from './furniture'
 import type { Issue, Opening, RoomBox } from './model'
 
-export function IssuesPanel({ issues, onSelectRoom }: { issues: Issue[]; onSelectRoom: (id: string) => void }) {
+export function IssuesPanel({ issues, onSelectRoom, onFit, busy }: { issues: Issue[]; onSelectRoom: (id: string) => void; onFit?: () => void; busy?: boolean }) {
   const errors = issues.filter((i) => i.severity === 'error'), warnings = issues.filter((i) => i.severity === 'warning'), infos = issues.filter((i) => i.severity === 'info')
   return (
     <Card>
       <CardHeader title="Layout validation" action={errors.length ? <Badge tone="red">{errors.length} error{errors.length > 1 ? 's' : ''}</Badge> : warnings.length ? <Badge tone="amber">{warnings.length} warning{warnings.length > 1 ? 's' : ''}</Badge> : <Badge tone="green">Valid</Badge>} />
       <CardBody className="space-y-2 p-3">
         {issues.length === 0 && <p className="flex items-center gap-2 p-2 text-sm text-emerald-700"><CheckCircle2 className="h-4 w-4" /> Every room is reachable from the entrance, nothing overlaps and furniture leaves walkways clear.</p>}
+        {onFit && issues.some((i) => i.code === 'unassigned-space') && (
+          <div className="rounded-md border border-orange-200 bg-orange-50 p-2 text-xs text-orange-900">
+            Your rooms cover only part of the building footprint. <Button size="sm" variant="accent" className="mt-2" loading={busy} onClick={onFit}>Fit rooms to the whole footprint</Button>
+            <p className="mt-1 text-orange-800">Re-lays your room types (same counts) to fill the building. Replaces current room sizes and positions.</p>
+          </div>
+        )}
         {[...errors, ...warnings, ...infos].map((i, k) => {
           const Icon = i.severity === 'error' ? XCircle : i.severity === 'warning' ? AlertTriangle : Info
           return (
