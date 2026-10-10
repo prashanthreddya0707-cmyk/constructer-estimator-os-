@@ -122,19 +122,45 @@ def compute_quantities(
         if rooms:
             int_len_total += max(0.0, (sum(2 * (r.length + r.width) for r in rooms) - geo.external_perimeter) / 2.0)
     int_gross = int_len_total * int_h
-    doors = sum(r.doors for r in b.rooms)
-    windows = sum(r.windows for r in b.rooms)
-    door_area = doors * a.door_w * a.door_h
-    window_area = windows * a.window_w * a.window_h
-    if window_area > ext_gross * 0.9 or (int_gross > 0 and door_area > int_gross):
+    # Openings: real sizes from the saved layout when available, otherwise estimated from the room counts using the
+    # same rules as the 3D generator (one entrance, >= 1 door per room, bathroom doors narrower).
+    window_area = ext_door_area = int_door_area = 0.0
+    doors = windows = 0
+    if b.openings is not None:
+        for o in b.openings:
+            if o.kind == "window":
+                windows += 1
+                window_area += o.width * o.height
+            else:
+                doors += 1
+                if o.exterior:
+                    ext_door_area += o.width * o.height
+                else:
+                    int_door_area += o.width * o.height
+        openings_source = "saved 3D layout"
+    else:
+        for r in b.rooms:
+            windows += r.windows
+            window_area += r.windows * a.window_w * a.window_h
+            n = 0 if r.room_type in ("corridor", "staircase") else max(r.doors, 1)
+            bath = r.room_type == "bathroom"
+            dw, dh = (a.bathroom_door_w, a.bathroom_door_h) if bath else (a.door_w, a.door_h)
+            doors += n
+            int_door_area += n * dw * dh
+        if b.rooms:  # main entrance on the ground floor
+            doors += 1
+            ext_door_area += a.entrance_w * a.entrance_h
+        openings_source = "estimated from room door/window counts"
+    door_area = ext_door_area + int_door_area
+    if window_area + ext_door_area > ext_gross * 0.9 or (int_gross > 0 and int_door_area > int_gross):
         warnings.append("Opening areas are very large compared with the wall area; check door/window counts.")
-    window_area = min(window_area, ext_gross)
-    door_area = min(door_area, int_gross)
-    # Windows assumed in external walls; doors assumed in internal partitions.
-    ext_vol = max(0.0, (ext_gross - window_area) * t_ext)
-    int_vol = max(0.0, (int_gross - door_area) * t_int)
-    if b.rooms and doors == 0 and windows == 0:
-        warnings.append("No doors or windows entered: masonry, plaster and paint are likely over-estimated.")
+    ext_open = min(window_area + ext_door_area, ext_gross)
+    int_open = min(int_door_area, int_gross)
+    # Windows and the entrance are in external walls; interior doors are in partitions (shared walls counted once).
+    ext_vol = max(0.0, (ext_gross - ext_open) * t_ext)
+    int_vol = max(0.0, (int_gross - int_open) * t_int)
+    if b.rooms and b.openings is None and all(r.doors == 0 and r.windows == 0 for r in b.rooms):
+        warnings.append("No doors or windows entered: default openings are assumed (one entrance, one door per room, no windows); masonry, plaster and paint may be over-estimated.")
 
     def units(kind: str, vol: float):
         if kind == "block":
@@ -158,7 +184,7 @@ def compute_quantities(
     steel_kg = c.steel_weight(conc_vol, a.steel_kg_per_m3)
 
     # ---- Plaster & paint --------------------------------------------------------------
-    wall_faces = max(0.0, 2 * (ext_gross - window_area) + 2 * (int_gross - door_area))
+    wall_faces = max(0.0, 2 * (ext_gross - ext_open) + 2 * (int_gross - int_open))
     rooms_area_total = sum(geo.rooms_area_by_floor.values())
     ceiling_area = (rooms_area_total if rooms_area_total > 0 else geo.total_built_up_area) if a.plaster_ceilings else 0.0
     plaster_area = wall_faces + ceiling_area
@@ -236,7 +262,7 @@ def compute_quantities(
         f"External wall {t_ext:g} m ({a.external_masonry}), internal wall {t_int:g} m ({a.internal_masonry})",
         f"Wall height {H:g} m; external perimeter {geo.external_perimeter:.2f} m × {n_floors} floor(s)",
         f"Internal wall length ≈ (Σ room perimeters − external perimeter) ÷ 2 per floor = {int_len_total:.2f} m total (shared walls counted once)",
-        f"Openings deducted: {windows} window(s) × {a.window_w:g}×{a.window_h:g} m (external), {doors} door(s) × {a.door_w:g}×{a.door_h:g} m (internal)",
+        f"Openings deducted ({openings_source}): {windows} window(s) {window_area:.1f} m², {doors} door(s) {door_area:.1f} m² (entrance + internal)",
         f"Net masonry volume {masonry_vol:.2f} m³; mortar joint {a.mortar_joint * 1000:g} mm",
     ]
     raw["bricks"] = (
@@ -294,4 +320,5 @@ def compute_quantities(
             gross_quantity=gross, formula=formula, assumptions=assumptions,
             counts_toward_cost=counts, note=note,
         ))
+    geo.openings_source, geo.door_count, geo.window_count = openings_source, doors, windows
     return geo, items, warnings

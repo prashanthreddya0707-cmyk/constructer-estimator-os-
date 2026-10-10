@@ -85,6 +85,25 @@ def analyze(fp: FloorPlan = Depends(get_owned_floorplan)):
     }
 
 
+@router.post("/floorplans/{fid}/detect-rooms")
+def detect(fp: FloorPlan = Depends(get_owned_floorplan)):
+    """Suggest room rectangles from the image. Heuristic: the user must review and confirm before anything is created."""
+    import base64
+    if fp.content_type == "application/pdf":
+        raise HTTPException(422, "Room detection works on JPG/PNG plans. Export the PDF page as an image, or enter rooms manually.")
+    st = upload_storage()
+    if not st.exists(fp.storage_key):
+        raise HTTPException(404, "The stored floor-plan file is no longer available.")
+    try:
+        res = processing.detect_rooms(st.read(fp.storage_key))
+    except processing.UploadError as e:
+        raise HTTPException(422, str(e))
+    return {
+        "rooms": res["rooms"], "image_size": res["image_size"], "warnings": res["warnings"], "disclaimer": res["disclaimer"],
+        "overlay_png_base64": base64.b64encode(res["overlay_png"]).decode(), "scale_m_per_px": fp.scale_m_per_px,
+    }
+
+
 @router.delete("/floorplans/{fid}", status_code=204)
 def delete_floorplan(fp: FloorPlan = Depends(get_owned_floorplan), db: Session = Depends(get_db)):
     upload_storage().delete(fp.storage_key)

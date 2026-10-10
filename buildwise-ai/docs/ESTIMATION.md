@@ -19,3 +19,12 @@ Units: metres, square metres, cubic metres. Net quantity = exact requirement; **
 
 Not included: columns, beams, footings (use the frame allowance), wall tiling, primer/external coats, plumbing, electrical, labour (optional separate category).
 Concrete, mortar and plaster are **quantity-only** lines unless ready-mix is chosen, to avoid counting cement and sand twice.
+
+## Doors and windows
+
+Openings are deducted from wall areas (both for bricks/blocks and for plaster/paint faces). Source, in order:
+
+1. **Saved 3D layout** – exact door/window sizes stored by the Studio (`projects.layout.summary`). Used only if the stored plan signature equals the current plan (`plan_signature` in Python is the same function as `planSignature` in TypeScript); otherwise it is ignored as stale.
+2. **Counts-based fallback** – the per-room door/window counts with default sizes: entrance 1.0 × 2.1 m, internal 0.9 × 2.1 m, bathroom 0.75 × 2.0 m, windows 1.2 × 1.2 m, plus one main entrance.
+
+Shared interior walls are counted once; an interior door is deducted from that single wall. The Estimation page states which source was used and how many doors/windows were deducted. Furniture is never included in any quantity.

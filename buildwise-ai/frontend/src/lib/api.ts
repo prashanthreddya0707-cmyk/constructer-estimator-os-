@@ -1,7 +1,8 @@
 import type {
   Dashboard, Estimate, FloorPlan, Material, Project, ProjectCreate, ProjectDetail, Recommendation, Report,
-  Room, RoomInput, User, ProjectBase, ExtraCostConfig,
+  Room, RoomInput, User, ProjectBase, ExtraCostConfig, DetectResult,
 } from '@/types'
+import type { SavedLayout } from '@/features/building-3d/layoutStore'
 
 const BASE = `${(import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''}/api`
 const TOKEN_KEY = 'bw_token'
@@ -79,6 +80,9 @@ export const api = {
   addRoom: (pid: string, d: RoomInput) => json<Room>(`/projects/${pid}/rooms`, { method: 'POST', body: body(d) }),
   updateRoom: (pid: string, rid: string, d: RoomInput) => json<Room>(`/projects/${pid}/rooms/${rid}`, { method: 'PUT', body: body(d) }),
   deleteRoom: (pid: string, rid: string) => json<void>(`/projects/${pid}/rooms/${rid}`, { method: 'DELETE' }),
+  replaceRooms: (pid: string, rooms: RoomInput[]) => json<Room[]>(`/projects/${pid}/rooms`, { method: 'PUT', body: body({ rooms }) }),
+  saveLayout: (pid: string, layout: SavedLayout) => json<ProjectDetail>(`/projects/${pid}/layout`, { method: 'PUT', body: body(layout) }),
+  resetLayout: (pid: string) => json<ProjectDetail>(`/projects/${pid}/layout`, { method: 'DELETE' }),
   // estimate
   runEstimate: (pid: string, overrides?: { material_selections?: Record<string, string | null>; wastage?: Record<string, number> }) =>
     json<Estimate>(`/projects/${pid}/estimate`, { method: 'POST', body: body(overrides ? { persist: false, ...overrides } : {}) }),
@@ -93,6 +97,7 @@ export const api = {
   calibrate: (id: string, d: { x1: number; y1: number; x2: number; y2: number; real_length_m: number }) =>
     json<FloorPlan>(`/floorplans/${id}/calibration`, { method: 'PUT', body: body(d) }),
   analyzeFloorplan: (id: string) => json<{ overlay_png_base64: string; edges_png_base64: string; contour_count: number; disclaimer: string }>(`/floorplans/${id}/analyze`, { method: 'POST' }),
+  detectRooms: (id: string) => json<DetectResult>(`/floorplans/${id}/detect-rooms`, { method: 'POST' }),
   floorplanBlob: async (id: string) => (await raw(`/floorplans/${id}/file`)).blob(),
   // materials / prices
   materials: (estimate_key?: string) => json<Material[]>(`/materials${estimate_key ? `?estimate_key=${estimate_key}` : ''}`),

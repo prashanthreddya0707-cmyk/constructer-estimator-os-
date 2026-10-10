@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Estimate, EstimateItemRow, Project, Recommendation
 from app.services.estimation import Assumptions, BuildingInput, RoomInput, compute_quantities
+from app.services.estimation.layout import openings_from_layout
 from app.services.optimization.engine import OptimizationContext, generate_recommendations
 from app.services.pricing.costing import apply_prices, summarize
 from app.services.pricing.service import build_price_lookup
@@ -25,6 +26,7 @@ def building_from_project(p: Project) -> BuildingInput:
             )
             for r in p.rooms
         ],
+        openings=openings_from_layout(p.layout, p, p.rooms),
     )
 
 

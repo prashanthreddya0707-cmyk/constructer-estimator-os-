@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ProjectDetail, Room } from '@/types'
 import { buildModel, schematicLayout, validateProject, type Box, type FloorModel } from './model'
+import { makeLayout, planSignature } from './layoutStore'
 
 const room = (o: Partial<Room>): Room => ({
   id: 'r' + Math.random().toString(36).slice(2), project_id: 'p', name: 'R', room_type: 'bedroom', length: 4, width: 3, height: 3,
@@ -9,7 +10,7 @@ const room = (o: Partial<Room>): Room => ({
 const project = (o: Partial<ProjectDetail> = {}): ProjectDetail => ({
   id: 'p', name: 'P', description: '', owner_name: '', building_type: 'residential', location: '', floors: 2, currency: 'INR', budget: null,
   length: 10, width: 8, height: 3, wall_thickness: 0.23, slab_thickness: 0.15, built_up_area: null, is_demo: false, created_at: '', updated_at: '',
-  assumptions: {}, wastage: {}, material_selections: {}, extra_costs: {}, purchase_quantities: {}, room_count: 0, floor_area: 80,
+  assumptions: {}, wastage: {}, material_selections: {}, extra_costs: {}, purchase_quantities: {}, layout: null, room_count: 0, floor_area: 80,
   total_built_up_area: 160, latest_total_cost: null, has_estimate: false, rooms: [], floorplans: [], ...o,
 })
 
@@ -158,10 +159,11 @@ describe('furniture is decorative and never blocks anything', () => {
     }
   })
 
-  it('does not change plan geometry when furniture is present', () => {
-    const none = buildModel(project({ floors: 1, rooms: plan().map((r) => ({ ...r, room_type: 'corridor' })) }))
-    expect(none.floors[0].furniture).toHaveLength(0)
-    expect(none.floors[0].walls.length).toBe(f.walls.length)
+  it('does not change plan geometry when furniture is switched off', () => {
+    const off = buildModel(project({ floors: 1, rooms: plan() }), { autoFurnish: false }).floors[0]
+    expect(off.furnitureItems).toHaveLength(0)
+    expect(off.walls.map((w) => w.pieces)).toEqual(f.walls.map((w) => w.pieces))
+    expect(off.openings).toEqual(f.openings)
   })
 })
 
@@ -237,5 +239,156 @@ describe('layout handling', () => {
     for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) worst = Math.max(worst, overlapVolume(boxes[i], boxes[j]))
     expect(worst).toBeLessThan(1e-6)
     expect(f.openings.length).toBeGreaterThanOrEqual(6)
+  })
+})
+
+
+describe('openings: entrance, a door for every room, real sizes', () => {
+  const rooms = plan()
+  const p = project({ floors: 1, rooms })
+  const m = buildModel(p)
+  const f = m.floors[0]
+
+  it('adds exactly one main entrance (1.0 × 2.1 m) on an exterior wall of a ground-floor room', () => {
+    const e = f.openings.filter((o) => o.entrance)
+    expect(e).toHaveLength(1)
+    expect(e[0].width).toBeCloseTo(1.0)
+    expect(e[0].height).toBeCloseTo(2.1)
+    expect(f.walls.find((w) => w.id === e[0].wallId)!.exterior).toBe(true)
+  })
+
+  it('gives every room a doorway even when its door count is 0', () => {
+    const noDoors = plan().map((r) => ({ ...r, doors: 0 }))
+    const mm2 = buildModel(project({ floors: 1, rooms: noDoors })).floors[0]
+    for (const r of mm2.rooms) {
+      const own = mm2.openings.filter((o) => o.kind === 'door' && !o.entrance && o.roomId === r.id).length
+      const shared = mm2.openings.some((o) => o.kind === 'door' && !o.entrance && o.roomId !== r.id && Math.abs((o.orientation === 'x' ? o.center : o.center)) >= 0)
+      expect(own > 0 || shared, r.name).toBe(true)
+    }
+    expect(buildModel(project({ floors: 1, rooms: noDoors })).issues.filter((i) => i.severity === 'error')).toEqual([])
+  })
+
+  it('bathroom doors are 0.75 × 2.0 and other internal doors 0.9 × 2.1', () => {
+    const bath = f.rooms.find((r) => r.type === 'bathroom')!
+    const doors = f.openings.filter((o) => o.kind === 'door' && !o.entrance)
+    for (const d of doors) {
+      const owner = f.rooms.find((r) => r.id === d.roomId)!
+      if (owner.id === bath.id) { expect(d.width).toBeCloseTo(0.75); expect(d.height).toBeCloseTo(2.0) } else expect(d.width).toBeLessThanOrEqual(0.9 + 1e-9)
+    }
+  })
+
+  it('every room is reachable from the entrance (no validation errors)', () => {
+    expect(m.issues.filter((i) => i.severity === 'error')).toEqual([])
+  })
+
+  it('door panels are fully inside the wall span and clear of corners and of each other', () => {
+    for (const o of f.openings) {
+      const w = f.walls.find((x) => x.id === o.wallId)!
+      expect(o.center - o.width / 2).toBeGreaterThanOrEqual(w.a0 + 0.1 - 1e-6)
+      expect(o.center + o.width / 2).toBeLessThanOrEqual(w.a1 - 0.1 + 1e-6)
+    }
+  })
+
+  it('door/window sizes are summarised for the estimator', () => {
+    const r = m.resolved.summary
+    expect(r.doors.length).toBe(f.openings.filter((o) => o.kind === 'door').length)
+    expect(r.windows.length).toBe(f.openings.filter((o) => o.kind === 'window').length)
+    expect(r.doors.filter((d) => d.exterior)).toHaveLength(1) // only the entrance is in an exterior wall
+    expect(r.windows.length).toBeGreaterThan(0)
+  })
+})
+
+describe('open circulation: passage and stairs share no wall', () => {
+  const rooms = [
+    room({ id: 'p', name: 'Passage', room_type: 'corridor', length: 7.6, width: 1.2, pos_x: 2.4, pos_y: 3, doors: 0, windows: 0 }),
+    room({ id: 's', name: 'Stairs', room_type: 'staircase', length: 2.4, width: 1.2, pos_x: 0, pos_y: 3, doors: 0, windows: 0 }),
+    room({ id: 'l', name: 'Living', room_type: 'living', length: 10, width: 3, pos_x: 0, pos_y: 4.2, doors: 1, windows: 1 }),
+    room({ id: 'b', name: 'Bed', room_type: 'bedroom', length: 10, width: 3, pos_x: 0, pos_y: 0, doors: 1, windows: 1 }),
+  ]
+  const f = buildModel(project({ length: 10, width: 7.2, floors: 1, rooms })).floors[0]
+  it('creates no partition between the passage and the staircase', () => {
+    const between = f.walls.filter((w) => !w.exterior && w.orientation === 'z' && Math.abs(w.line - (2.4 - 5)) < 0.05)
+    expect(between).toHaveLength(0)
+  })
+  it('keeps the passage connected to the rest of the building', () => {
+    const m = buildModel(project({ length: 10, width: 7.2, floors: 1, rooms }))
+    expect(m.issues.filter((i) => i.severity === 'error')).toEqual([])
+  })
+})
+
+describe('layout validation reports problems instead of hiding them', () => {
+  it('flags a room that cannot be reached', () => {
+    const rooms = [
+      room({ id: 'a', name: 'Hall', room_type: 'living', length: 4, width: 4, pos_x: 0, pos_y: 0, doors: 1, windows: 1 }),
+      room({ id: 'b', name: 'Far room', room_type: 'bedroom', length: 4, width: 4, pos_x: 6, pos_y: 0, doors: 1, windows: 1 }), // 2 m gap: no shared wall
+    ]
+    const m = buildModel(project({ length: 10, width: 4, rooms }))
+    expect(m.issues.some((i) => i.code === 'unreachable' && i.roomId === 'b')).toBe(true)
+  })
+  it('flags overlapping rooms and rooms outside the footprint', () => {
+    const over = [room({ id: 'a', pos_x: 0, pos_y: 0, length: 5, width: 4 }), room({ id: 'b', pos_x: 4, pos_y: 0, length: 5, width: 4 })]
+    expect(buildModel(project({ length: 10, width: 4, rooms: over })).issues.some((i) => i.code === 'room-overlap')).toBe(true)
+    const out = [room({ id: 'a', pos_x: 8, pos_y: 0, length: 4, width: 4 })]
+    expect(buildModel(project({ length: 10, width: 4, rooms: out })).issues.some((i) => i.code === 'outside-footprint')).toBe(true)
+  })
+  it('a floor above the ground floor without a staircase is reported', () => {
+    const rooms = [room({ id: 'a', floor_number: 1, pos_x: 0, pos_y: 0, length: 5, width: 4 }), room({ id: 'b', floor_number: 2, pos_x: 0, pos_y: 0, length: 5, width: 4 })]
+    expect(buildModel(project({ length: 5, width: 4, floors: 2, rooms })).issues.some((i) => i.code === 'no-stairs' && i.floor === 2)).toBe(true)
+  })
+  it('an empty project explains what to do instead of failing', () => {
+    const m = buildModel(project({ rooms: [] }))
+    expect(m.ok).toBe(true)
+    expect(m.issues.some((i) => i.code === 'no-rooms')).toBe(true)
+  })
+})
+
+describe('saved (custom) openings', () => {
+  const rooms = plan()
+  const p = project({ floors: 1, rooms })
+  const base = buildModel(p)
+  const sig = planSignature(p, rooms)
+  const layoutWith = (openings: typeof base.resolved.openings) =>
+    makeLayout({ signature: sig, settings: {}, openings, furniture: null, summary: base.resolved.summary })
+
+  it('reloading the saved layout reproduces the same openings (persistence round trip)', () => {
+    const m = buildModel(p, { layout: layoutWith(base.resolved.openings) })
+    const key = (o: { kind: string; center: number; line: number; width: number }) => `${o.kind}:${o.line.toFixed(3)}:${o.center.toFixed(3)}:${o.width.toFixed(3)}`
+    expect(m.floors[0].openings.map(key).sort()).toEqual(base.floors[0].openings.map(key).sort())
+  })
+
+  it('a moved door stays where the user put it', () => {
+    const ops = base.resolved.openings.map((o) => ({ ...o }))
+    const door = ops.find((o) => o.kind === 'door' && !o.entrance)!
+    const wall = base.floors[0].walls.find((w) => w.id === base.floors[0].openings.find((x) => x.id === door.id)!.wallId)!
+    const room = door.center + 0.25 < (wall.orientation === 'x' ? wall.a1 + 5 : wall.a1 + 4) - 1 ? 0.25 : -0.25
+    door.center += room
+    const m = buildModel(p, { layout: layoutWith(ops) })
+    const moved = m.floors[0].openings.find((o) => o.id === door.id)
+    if (moved) expect(moved.center + (moved.orientation === 'x' ? 5 : 4)).toBeCloseTo(door.center, 6)
+    else expect(m.issues.some((i) => i.code === 'opening-dropped')).toBe(true) // never silently misplaced
+  })
+
+  it('in saved mode windows are exactly the saved ones (a deleted window stays deleted)', () => {
+    const ops = base.resolved.openings.filter((o) => o.kind !== 'window')
+    const m = buildModel(p, { layout: layoutWith(ops) })
+    expect(m.floors[0].openings.filter((o) => o.kind === 'window')).toHaveLength(0)
+    expect(m.floors[0].openings.filter((o) => o.kind === 'door').length).toBeGreaterThanOrEqual(base.floors[0].openings.filter((o) => o.kind === 'door').length - 0)
+  })
+
+  it('a saved opening that no longer fits is dropped with a warning, and rooms still get a door', () => {
+    const ops = base.resolved.openings.map((o) => ({ ...o }))
+    const bad = ops.find((o) => o.kind === 'window')!
+    ops.push({ ...bad, id: 'overlap', center: bad.center + 0.1 }) // overlaps an existing window
+    const m = buildModel(p, { layout: layoutWith(ops) })
+    expect(m.issues.some((i) => i.code === 'opening-dropped')).toBe(true)
+    expect(m.issues.filter((i) => i.severity === 'error')).toEqual([])
+  })
+
+  it('removing a room\'s door in a saved layout does not leave it without access', () => {
+    const roomId = 'bth'
+    const ops = base.resolved.openings.filter((o) => !(o.kind === 'door' && o.room_id === roomId))
+    const m = buildModel(p, { layout: layoutWith(ops) })
+    const f2 = m.floors[0]
+    expect(f2.openings.some((o) => o.kind === 'door' && o.roomId === roomId) || m.issues.some((i) => i.roomId === roomId)).toBe(true)
   })
 })

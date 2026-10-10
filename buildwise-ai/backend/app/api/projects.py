@@ -7,7 +7,7 @@ from app.api.deps import get_current_user, get_owned_project
 from app.core.db import get_db
 from app.models import Estimate, Project, Room, User
 from app.schemas import (
-    EstimateRequest, ProjectConfigUpdate, ProjectCreate, ProjectDetail, ProjectOut, ProjectUpdate, RoomIn, RoomOut,
+    EstimateRequest, LayoutIn, ProjectConfigUpdate, RoomsReplace, ProjectCreate, ProjectDetail, ProjectOut, ProjectUpdate, RoomIn, RoomOut,
 )
 from app.services.estimate_service import compute_estimate, estimate_to_payload, save_estimate
 from app.services.estimation import EstimationError
@@ -148,6 +148,41 @@ def delete_room(room_id: str, p: Project = Depends(get_owned_project), db: Sessi
     db.delete(_room(db, p, room_id))
     p.updated_at = _now()
     db.commit()
+
+
+@router.put("/projects/{project_id}/rooms", response_model=list[RoomOut])
+def replace_rooms(body: RoomsReplace, p: Project = Depends(get_owned_project), db: Session = Depends(get_db)):
+    """Atomically replace all rooms (used by the layout generator and by confirmed floor-plan imports)."""
+    _validate_rooms_vs_floors(body.rooms, p.floors)
+    for r in list(p.rooms):
+        db.delete(r)
+    db.flush()
+    p.rooms = [Room(project_id=p.id, **r.model_dump()) for r in body.rooms]
+    p.layout = None  # openings / furniture of the old rooms no longer apply
+    p.updated_at = _now()
+    db.commit()
+    db.refresh(p)
+    return p.rooms
+
+
+@router.put("/projects/{project_id}/layout", response_model=ProjectDetail)
+def save_layout(body: LayoutIn, p: Project = Depends(get_owned_project), db: Session = Depends(get_db)):
+    """Persist custom openings, furniture arrangement, settings and the estimator summary."""
+    p.layout = body.model_dump()
+    p.updated_at = _now()
+    db.commit()
+    db.refresh(p)
+    return project_out(p, detail=True)
+
+
+@router.delete("/projects/{project_id}/layout", response_model=ProjectDetail)
+def reset_layout(p: Project = Depends(get_owned_project), db: Session = Depends(get_db)):
+    """Back to the fully automatic arrangement."""
+    p.layout = None
+    p.updated_at = _now()
+    db.commit()
+    db.refresh(p)
+    return project_out(p, detail=True)
 
 
 # ---- estimate -------------------------------------------------------------------------------
