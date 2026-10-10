@@ -11,7 +11,7 @@ import { Field, Input, Select } from '@/components/ui/form'
 import { BuildingViewer, type ViewMode } from '@/features/building-3d/BuildingViewer'
 import { FloorPlanImportDialog } from '@/features/building-3d/FloorPlanImportDialog'
 import { configFromProject, LayoutGeneratorDialog } from '@/features/building-3d/LayoutGeneratorDialog'
-import { generateLayout, type GeneratorConfig } from '@/features/building-3d/layoutGenerator'
+import { DEFAULT_CONFIG, generateLayout, type GeneratorConfig } from '@/features/building-3d/layoutGenerator'
 import { PlanView, type PlanMode } from '@/features/building-3d/PlanView'
 import { FurniturePanel, IssuesPanel, OpeningPanel } from '@/features/building-3d/StudioPanels'
 import { useStudioLayout } from '@/features/building-3d/useStudioLayout'
@@ -132,6 +132,22 @@ function StudioBody({ projectId }: { projectId: string }) {
       await applyGenerated(cfg, res.rooms)
     } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not generate the layout.') } finally { setBusy(false) }
   }
+  /** Re-lay the project's existing room types so they fill the whole footprint (for plans whose rooms cover only part of it). */
+  const fitToFootprint = async () => {
+    setBusy(true)
+    try {
+      const cfg = configFromProject(p)
+      const counts = { ...cfg.counts, bedroom: 0, living: 0, kitchen: 0, dining: 0, bathroom: 0, study: 0, store: 0 }
+      const perFloor = Math.max(1, p.floors)
+      for (const r of p.rooms) { const t = r.room_type as keyof typeof counts; if (t in counts) counts[t] += 1 }
+      for (const k of Object.keys(counts) as (keyof typeof counts)[]) counts[k] = Math.ceil(counts[k] / perFloor)
+      if (!Object.values(counts).some(Boolean)) Object.assign(counts, DEFAULT_CONFIG.counts)
+      const next = { ...cfg, counts }
+      const res = generateLayout(next)
+      if (res.errors.length) { toast.error(`${res.errors[0]} ${res.suggestions[0] ?? ''}`); setGenOpen(true); return }
+      await applyGenerated(next, res.rooms)
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Could not fit the rooms.') } finally { setBusy(false) }
+  }
   const applyImport = async (rooms: RoomInput[], dims: { length: number; width: number } | null, fl: number) => {
     if (dims) await api.updateProject(p.id, { ...projectBase(p), length: dims.length, width: dims.width, built_up_area: null })
     await api.replaceRooms(p.id, [...p.rooms.filter((r) => r.floor_number !== fl).map(roomInput), ...rooms])
@@ -241,7 +257,7 @@ function StudioBody({ projectId }: { projectId: string }) {
           </CardBody>
         </Card>
 
-        <IssuesPanel issues={model.issues.filter((i) => i.code !== 'schematic')} onSelectRoom={selectRoom} />
+        <IssuesPanel issues={model.issues.filter((i) => i.code !== 'schematic')} onSelectRoom={selectRoom} onFit={fitToFootprint} busy={busy} />
         {errors.length > 0 && <p className="text-xs text-red-700">Fix the errors above, then generate / save again. The model still shows the plan exactly as saved.</p>}
 
         <Card>
