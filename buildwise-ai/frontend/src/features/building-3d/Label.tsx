@@ -16,7 +16,7 @@ function makeTexture(text: string, sub: string | undefined, active: boolean, dar
   canvas.width = Math.ceil(w1 + w2 + padX * 2)
   canvas.height = h
   const ctx = canvas.getContext('2d')!
-  ctx.fillStyle = active ? '#f97316' : dark ? 'rgba(11,31,58,0.88)' : 'rgba(255,255,255,0.92)'
+  ctx.fillStyle = active ? '#f97316' : dark ? 'rgba(11,31,58,0.88)' : 'rgba(255,255,255,0.94)'
   ctx.beginPath()
   ctx.roundRect(0, 0, canvas.width, h, 6 * dpr)
   ctx.fill()
@@ -39,13 +39,20 @@ function makeTexture(text: string, sub: string | undefined, active: boolean, dar
   return { tex, aspect: canvas.width / canvas.height }
 }
 
-export function Label({ text, sub, position, active = false, dark = false, size }: {
-  text: string; sub?: string; position: [number, number, number]; active?: boolean; dark?: boolean; size: number
+/**
+ * Billboard label. `maxWidth` (world units) keeps the label inside its room so neighbouring labels never overlap;
+ * returns nothing when the room is too small for a readable label.
+ */
+export function Label({ text, sub, position, active = false, dark = false, size, maxWidth }: {
+  text: string; sub?: string; position: [number, number, number]; active?: boolean; dark?: boolean; size: number; maxWidth?: number
 }) {
   const { tex, aspect } = useMemo(() => makeTexture(text, sub, active, dark), [text, sub, active, dark])
   useEffect(() => () => tex.dispose(), [tex])
+  const fit = maxWidth ? Math.min(1, maxWidth / (size * aspect)) : 1
+  if (fit < 0.5 && !active) return null
+  const h = size * (active ? Math.max(fit, 0.6) : fit)
   return (
-    <sprite position={position} scale={[size * aspect, size, 1]} renderOrder={active ? 20 : 10}>
+    <sprite position={position} scale={[h * aspect, h, 1]} renderOrder={active ? 20 : 10}>
       <spriteMaterial map={tex} transparent depthTest={false} toneMapped={false} />
     </sprite>
   )
