@@ -5,6 +5,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { Label } from './Label'
 import { floorKind, getTextures, PALETTE } from './materials'
+import { itemRect } from './furniture'
 import type { Box, FloorModel, Model3D, Opening, RoomBox, Side } from './model'
 
 export type ViewMode = 'exterior' | 'top'
@@ -14,6 +15,9 @@ export interface ViewerOptions {
   showLabels: boolean
   showRoof: boolean
   showFurniture: boolean
+  showWalls: boolean
+  showOpenings: boolean
+  doorsOpen: boolean
   wireframe: boolean
   resetNonce: number
 }
@@ -104,9 +108,9 @@ function RoomFloor({ r, mat, geo }: { r: RoomBox; mat: THREE.Material; geo: THRE
   return <mesh geometry={geo} material={mat} position={[r.cx, r.y + 0.012, r.cz]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow />
 }
 
-function DoorLeaf({ o, y, wireframe }: { o: Opening; y: number; wireframe: boolean }) {
+function DoorLeaf({ o, y, wireframe, open }: { o: Opening; y: number; wireframe: boolean; open: boolean }) {
   const hinge = o.center - o.width / 2
-  const angle = ((o.orientation === 'x' ? -o.into : o.into) * 75 * Math.PI) / 180
+  const angle = open ? ((o.orientation === 'x' ? -o.into : o.into) * 75 * Math.PI) / 180 : 0
   const pos: [number, number, number] = o.orientation === 'x' ? [hinge, y, o.line] : [o.line, y, hinge]
   const size: [number, number, number] = o.orientation === 'x' ? [o.width - 0.04, o.height - 0.03, 0.04] : [0.04, o.height - 0.03, o.width - 0.04]
   const offset: [number, number, number] = o.orientation === 'x' ? [(o.width - 0.04) / 2, (o.height - 0.03) / 2, 0] : [0, (o.height - 0.03) / 2, (o.width - 0.04) / 2]
@@ -141,9 +145,9 @@ function openingParts(openings: Opening[], y: number): { frames: Box[]; glass: B
   return { frames, glass }
 }
 
-function Floor({ f, model, opts, cut, selectedId, hoverId, onSelect, onHover, labelsOn }: {
+function Floor({ f, model, opts, cut, selectedId, selectedFurnitureId, selectedOpeningId, hoverId, onSelect, onHover, labelsOn }: {
   f: FloorModel; model: Model3D; opts: ViewerOptions; cut: Side[] | null
-  selectedId: string | null; hoverId: string | null; onSelect: (id: string | null) => void; onHover: (id: string | null) => void; labelsOn: boolean
+  selectedId: string | null; selectedFurnitureId: string | null; selectedOpeningId: string | null; hoverId: string | null; onSelect: (id: string | null) => void; onHover: (id: string | null) => void; labelsOn: boolean
 }) {
   const wf = opts.wireframe
   const { slab, length: L, width: W, wallT } = model
@@ -193,17 +197,18 @@ function Floor({ f, model, opts, cut, selectedId, hoverId, onSelect, onHover, la
 
       {f.rooms.map((r) => { const g = floorGeos.find((x) => x.id === r.id)!; return <RoomFloor key={r.id} r={r} mat={mats[floorKind(r.type)]} geo={g.geo} /> })}
 
-      {wallGeo && (
+      {wallGeo && opts.showWalls && (
         <mesh geometry={wallGeo} castShadow receiveShadow>
           <meshStandardMaterial color={PALETTE.wall} roughness={0.92} wireframe={wf} />
         </mesh>
       )}
-      {frameGeo && <mesh geometry={frameGeo} castShadow><meshStandardMaterial color={PALETTE.frame} roughness={0.6} wireframe={wf} /></mesh>}
-      {glassGeo && <mesh geometry={glassGeo}><meshStandardMaterial color={PALETTE.glass} transparent opacity={wf ? 1 : 0.35} roughness={0.05} metalness={0.2} depthWrite={false} wireframe={wf} /></mesh>}
-      {doors.filter((o) => {
+      {opts.showOpenings && frameGeo && <mesh geometry={frameGeo} castShadow><meshStandardMaterial color={PALETTE.frame} roughness={0.6} wireframe={wf} /></mesh>}
+      {opts.showOpenings && glassGeo && <mesh geometry={glassGeo}><meshStandardMaterial color={PALETTE.glass} transparent opacity={wf ? 1 : 0.35} roughness={0.05} metalness={0.2} depthWrite={false} wireframe={wf} /></mesh>}
+      {opts.showOpenings && doors.filter((o) => {
         const w = f.walls.find((x) => x.id === o.wallId)
         return !(w && w.exterior && cut && w.side && cut.includes(w.side))
-      }).map((o) => <DoorLeaf key={o.id} o={o} y={f.y} wireframe={wf} />)}
+      }).map((o) => <DoorLeaf key={o.id} o={o} y={f.y} wireframe={wf} open={opts.doorsOpen} />)}
+      <Highlights f={f} furnitureId={selectedFurnitureId} openingId={selectedOpeningId} />
 
       {opts.showFurniture && furnitureGeos.map(({ color, geo }) => geo && (
         <mesh key={color} geometry={geo} castShadow receiveShadow><meshStandardMaterial color={color} roughness={0.75} wireframe={wf} /></mesh>
@@ -239,6 +244,30 @@ function Floor({ f, model, opts, cut, selectedId, hoverId, onSelect, onHover, la
       {f.index === 1 && <Dimensions L={L} W={W} size={model.labelSize * 0.75} />}
     </group>
   )
+}
+
+/** Orange outlines around the selected furniture piece / opening (works for pieces that are merged into one mesh). */
+function Highlights({ f, furnitureId, openingId }: { f: FloorModel; furnitureId: string | null; openingId: string | null }) {
+  const out: React.ReactNode[] = []
+  const box = (key: string, x0: number, x1: number, z0: number, z1: number, y0: number, y1: number) => {
+    const pts: [number, number, number][] = [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1], [x0, y1, z0]]
+    out.push(<Line key={key} points={pts} color="#ea580c" lineWidth={3} />)
+    out.push(<Line key={key + 'a'} points={[[x1, y0, z0], [x1, y1, z0]]} color="#ea580c" lineWidth={3} />, <Line key={key + 'b'} points={[[x1, y0, z1], [x1, y1, z1]]} color="#ea580c" lineWidth={3} />, <Line key={key + 'c'} points={[[x0, y0, z1], [x0, y1, z1]]} color="#ea580c" lineWidth={3} />)
+  }
+  const it = furnitureId ? f.furnitureItems.find((i) => i.id === furnitureId) : null
+  if (it) {
+    const r = itemRect(it)
+    const parts = f.furniture.filter((p) => p.itemId === it.id)
+    const top = parts.reduce((m, p) => Math.max(m, p.cy + p.sy / 2), f.y + 0.1) - f.y
+    box('fi', r.x0, r.x1, r.z0, r.z1, f.y + 0.02, f.y + Math.max(top, 0.1))
+  }
+  const o = openingId ? f.openings.find((x) => x.id === openingId) : null
+  if (o) {
+    const lo = o.center - o.width / 2, hi = o.center + o.width / 2, t = o.thickness / 2 + 0.03
+    if (o.orientation === 'x') box('op', lo, hi, o.line - t, o.line + t, f.y + o.sill, f.y + o.sill + o.height)
+    else box('op', o.line - t, o.line + t, lo, hi, f.y + o.sill, f.y + o.sill + o.height)
+  }
+  return <>{out}</>
 }
 
 function Dimensions({ L, W, size }: { L: number; W: number; size: number }) {
@@ -280,8 +309,8 @@ function Roof({ model, wireframe }: { model: Model3D; wireframe: boolean }) {
 
 // ---------------------------------------------------------------------------------------------------------------
 
-export function BuildingViewer({ model, opts, selectedId, onSelect }: {
-  model: Model3D; opts: ViewerOptions; selectedId: string | null; onSelect: (id: string | null) => void
+export function BuildingViewer({ model, opts, selectedId, selectedFurnitureId = null, selectedOpeningId = null, onSelect }: {
+  model: Model3D; opts: ViewerOptions; selectedId: string | null; selectedFurnitureId?: string | null; selectedOpeningId?: string | null; onSelect: (id: string | null) => void
 }) {
   const [hoverId, setHoverId] = useState<string | null>(null)
   const [cutSides, setCutSides] = useState<Side[]>(['E', 'S'])
@@ -315,7 +344,7 @@ export function BuildingViewer({ model, opts, selectedId, onSelect }: {
       <gridHelper args={[Math.max(60, size * 3), Math.max(60, size * 3), '#c4ccd6', '#d7dde5']} position={[0, -model.slab - 0.02, 0]} />
 
       {visible.map((f) => (
-        <Floor key={f.index} f={f} model={model} opts={opts} cut={cutaway ? cutSides : null} selectedId={selectedId} hoverId={hoverId}
+        <Floor key={f.index} f={f} model={model} opts={opts} cut={cutaway ? cutSides : null} selectedId={selectedId} selectedFurnitureId={selectedFurnitureId} selectedOpeningId={selectedOpeningId} hoverId={hoverId}
           onSelect={onSelect} onHover={setHoverId} labelsOn={opts.showLabels && !roofVisible && f.index === labelFloor} />
       ))}
       {roofVisible && <Roof model={model} wireframe={opts.wireframe} />}

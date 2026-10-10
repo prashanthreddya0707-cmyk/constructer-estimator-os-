@@ -53,6 +53,8 @@ class Project(Base):
     material_selections: Mapped[dict] = mapped_column(JSON, default=dict)  # estimate key -> material id
     extra_costs: Mapped[dict] = mapped_column(JSON, default=dict)
     purchase_quantities: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Saved 3D/2D layout: custom openings, furniture arrangement, settings and a summary used by the estimator.
+    layout: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)

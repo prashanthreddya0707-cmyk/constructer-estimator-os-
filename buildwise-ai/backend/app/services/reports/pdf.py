@@ -97,6 +97,7 @@ def build_report_pdf(data: dict) -> bytes:
         ("Slab thickness", f"{p['slab_thickness']:g} m"),
         ("Floor area (per floor)", f"{_num(g['floor_area'])} m²" + (" (manual override)" if p.get("built_up_area") else " (L × W)")),
         ("Total built-up area", f"{_num(g['total_built_up_area'])} m² ({_num(g['total_built_up_area'] / 0.09290304, 0)} sq ft)"),
+        ("Openings deducted", f"{g.get('door_count', 0)} door(s), {g.get('window_count', 0)} window(s) – {g.get('openings_source', 'n/a')}"),
     ]))
 
     story.append(Paragraph("3. Floors and rooms", h2))

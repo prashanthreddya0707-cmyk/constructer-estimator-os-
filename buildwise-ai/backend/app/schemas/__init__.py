@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
@@ -135,6 +135,7 @@ class ProjectOut(ProjectBase, ORM):
     material_selections: dict = {}
     extra_costs: dict = {}
     purchase_quantities: dict = {}
+    layout: Optional[dict] = None
     room_count: int = 0
     floor_area: float = 0.0
     total_built_up_area: float = 0.0
@@ -261,3 +262,72 @@ class ReportOut(ORM):
     total_cost: float
     currency: str
     created_at: datetime
+
+
+# ---------------- saved layout (openings / furniture / settings) ----------------
+class OpeningIn(BaseModel):
+    id: str = Field(max_length=96)
+    kind: Literal["door", "window"]
+    floor: int = Field(ge=1, le=100)
+    orientation: Literal["x", "z"]
+    line: float = Field(ge=-1000, le=1000)
+    center: float = Field(ge=-1000, le=1000)
+    width: float = Field(gt=0.2, le=6)
+    height: float = Field(gt=0.2, le=4)
+    sill: float = Field(ge=0, le=3)
+    room_id: str = Field(max_length=48)
+    into: Literal[1, -1] = 1
+    entrance: bool = False
+
+
+class FurnitureItemIn(BaseModel):
+    id: str = Field(max_length=96)  # "<room uuid>:<type>:<n>" is about 50 characters
+    room_id: str = Field(max_length=48)
+    type: str = Field(max_length=32)
+    cx: float = Field(ge=-1000, le=1000)
+    cz: float = Field(ge=-1000, le=1000)
+    w: float = Field(gt=0.01, le=12)
+    d: float = Field(gt=0.01, le=12)  # a wall mirror is only 4 cm deep
+    facing: Literal["N", "S", "E", "W"] = "N"
+
+
+class FurnitureIn(BaseModel):
+    items: list[FurnitureItemIn] = Field(default_factory=list, max_length=1500)
+    room_sigs: dict[str, str] = Field(default_factory=dict)
+
+
+class DoorSizeIn(BaseModel):
+    w: float = Field(gt=0.2, le=6)
+    h: float = Field(gt=0.2, le=4)
+    exterior: bool = False
+
+
+class WindowSizeIn(BaseModel):
+    w: float = Field(gt=0.2, le=6)
+    h: float = Field(gt=0.2, le=4)
+
+
+class LayoutSummaryIn(BaseModel):
+    doors: list[DoorSizeIn] = Field(default_factory=list, max_length=600)
+    windows: list[WindowSizeIn] = Field(default_factory=list, max_length=1200)
+
+
+class LayoutIn(BaseModel):
+    """Everything the Studio persists besides the rooms themselves. `openings`/`furniture` of None mean 'automatic'."""
+    version: int = 1
+    signature: str = Field(max_length=200000)
+    settings: dict = Field(default_factory=dict)
+    openings: Optional[list[OpeningIn]] = Field(default=None, max_length=1200)
+    furniture: Optional[FurnitureIn] = None
+    summary: LayoutSummaryIn = Field(default_factory=LayoutSummaryIn)
+
+    @field_validator("settings")
+    @classmethod
+    def _settings_small(cls, v: dict) -> dict:
+        if len(v) > 30 or any(not isinstance(k, str) or len(k) > 40 for k in v):
+            raise ValueError("too many or too long settings")
+        return {k: x for k, x in v.items() if isinstance(x, (bool, int, float, str))}
+
+
+class RoomsReplace(BaseModel):
+    rooms: list[RoomIn] = Field(default_factory=list, max_length=500)

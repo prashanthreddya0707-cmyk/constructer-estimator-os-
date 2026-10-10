@@ -62,6 +62,8 @@ export interface Project extends ProjectBase {
   material_selections: Record<string, string>
   extra_costs: Record<string, ExtraCostConfig>
   purchase_quantities: Record<string, number>
+  /** saved 3D/2D layout (custom openings, furniture arrangement, settings); null = fully automatic */
+  layout: import('@/features/building-3d/layoutStore').SavedLayout | null
   room_count: number
   floor_area: number
   total_built_up_area: number
@@ -148,7 +150,10 @@ export interface Estimate {
   created_at?: string
   stale?: boolean
   persisted: boolean
-  geometry: { floor_area: number; total_built_up_area: number; external_perimeter: number; internal_wall_length_per_floor: number }
+  geometry: {
+    floor_area: number; total_built_up_area: number; external_perimeter: number; internal_wall_length_per_floor: number
+    openings_source?: string; door_count?: number; window_count?: number
+  }
   summary: CostSummary
   assumptions: Record<string, unknown>
   warnings: string[]
@@ -168,4 +173,14 @@ export interface Dashboard {
   recent_reports: Report[]
   cost_distribution: { category: string; cost: number }[]
   material_quantities: { name: string; unit: string; quantity: number }[]
+}
+
+export interface DetectedRoom { index: number; x: number; y: number; w: number; h: number; fill_ratio: number; rectangular: boolean }
+export interface DetectResult {
+  rooms: DetectedRoom[]
+  image_size: [number, number]
+  warnings: string[]
+  disclaimer: string
+  overlay_png_base64: string
+  scale_m_per_px: number | null
 }

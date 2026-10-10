@@ -24,6 +24,15 @@ class RoomInput:
 
 
 @dataclass
+class OpeningInput:
+    """A door or window with its real size (from the saved 3D layout)."""
+    kind: str  # "door" | "window"
+    width: float
+    height: float
+    exterior: bool = False
+
+
+@dataclass
 class BuildingInput:
     length: float
     width: float
@@ -33,6 +42,8 @@ class BuildingInput:
     slab_thickness: float
     built_up_area: Optional[float] = None  # manual footprint override per floor (m2)
     rooms: list[RoomInput] = field(default_factory=list)
+    # Real openings from the saved layout. None => estimated from the rooms' door/window counts.
+    openings: Optional[list[OpeningInput]] = None
 
 
 @dataclass
@@ -48,8 +59,12 @@ class Assumptions:
     block_w: float = 0.10
     block_h: float = 0.20
     mortar_joint: float = 0.01  # metres
-    door_w: float = 1.0
+    door_w: float = 0.9  # internal door
     door_h: float = 2.1
+    entrance_w: float = 1.0  # main entrance (exterior wall)
+    entrance_h: float = 2.1
+    bathroom_door_w: float = 0.75
+    bathroom_door_h: float = 2.0
     window_w: float = 1.2
     window_h: float = 1.2
     # Mortar / plaster mixes (cement : sand)
@@ -132,3 +147,6 @@ class Geometry:
     internal_wall_length_per_floor: float
     rooms_area_by_floor: dict
     warnings: list[str] = field(default_factory=list)
+    openings_source: str = ""
+    door_count: int = 0
+    window_count: int = 0

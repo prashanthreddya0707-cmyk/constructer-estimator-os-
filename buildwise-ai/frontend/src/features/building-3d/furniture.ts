@@ -1,244 +1,425 @@
 /**
- * Decorative furniture. Generated from a room's rectangle and its openings; it never changes plan geometry.
- * Items are placed against walls (or room centre), must lie inside the clear room area and must not overlap the
- * door-swing zones, windows (for tall pieces) or each other. Rooms that are too small simply get fewer items.
+ * Automatic furnishing. For every room: read its rectangle, doors and windows, pick pieces for the room type, try
+ * positions and orientations, reject anything that touches a wall, a door-swing zone, a window (tall pieces) or another
+ * piece, then verify with a grid search that people can still walk from every door through the room.
+ * Rooms that are too small simply get fewer / smaller pieces. Furniture is decorative: it never changes the plan.
  */
-import type { Opening, RoomBox, Side } from './model'
+import { FURNITURE_SPECS, clampSize, itemRect, specOf, type FurnitureItem, type Rect } from './furnitureCatalog'
+import type { Facing } from './layoutStore'
+import type { Opening, RoomBox } from './model'
 
-export interface FurniturePart {
-  cx: number; cy: number; cz: number; sx: number; sy: number; sz: number
-  color: string
-  roomId: string
-  kind: string
-}
+export { partsFor, itemRect, typesForRoom, specOf, FURNITURE_SPECS, clampSize, rotateFacing } from './furnitureCatalog'
+export type { FurnitureItem, FurniturePart } from './furnitureCatalog'
 
-interface Rect { x0: number; x1: number; z0: number; z1: number }
 const overlaps = (a: Rect, b: Rect, pad = 0) => a.x0 < b.x1 + pad && a.x1 > b.x0 - pad && a.z0 < b.z1 + pad && a.z1 > b.z0 - pad
 const inside = (a: Rect, b: Rect) => a.x0 >= b.x0 - 1e-6 && a.x1 <= b.x1 + 1e-6 && a.z0 >= b.z0 - 1e-6 && a.z1 <= b.z1 + 1e-6
 
-const C = {
-  wood: '#8b6b4a', woodDark: '#5e4630', woodLight: '#b08a62', linen: '#f2efe9', white: '#fafaf7', fabric: '#5f7186', fabricLight: '#73869b',
-  cabinet: '#e4dfd5', worktop: '#3d4247', steel: '#aeb7bf', black: '#1f2227', porcelain: '#f5f5f2', water: '#d7e6ee', blanket: '#7f97ab',
-  wardrobe: '#d8d1c4', chair: '#c8b59a', fridge: '#d3d8dc',
+/** Clear floor area of a room (inside the finished wall faces). */
+export function interiorOf(room: RoomBox): Rect {
+  return { x0: room.x0 + room.inset.W, x1: room.x1 - room.inset.E, z0: room.z0 + room.inset.N, z1: room.z1 - room.inset.S }
 }
 
-type Facing = Side // the wall the item's back is against
+export interface Zones { doors: Rect[]; windows: Rect[] }
 
-/** Maps local (u along the wall, v away from it) coordinates of an item rect into a world-space rect. */
-function sub(r: Rect, back: Facing, u0: number, u1: number, v0: number, v1: number): Rect {
-  let a: [number, number], b: [number, number]
-  switch (back) {
-    case 'N': a = [r.x0 + u0, r.z0 + v0]; b = [r.x0 + u1, r.z0 + v1]; break
-    case 'S': a = [r.x0 + u0, r.z1 - v0]; b = [r.x0 + u1, r.z1 - v1]; break
-    case 'W': a = [r.x0 + v0, r.z0 + u0]; b = [r.x0 + v1, r.z0 + u1]; break
-    default: a = [r.x1 - v0, r.z0 + u0]; b = [r.x1 - v1, r.z0 + u1]; break
-  }
-  return { x0: Math.min(a[0], b[0]), x1: Math.max(a[0], b[0]), z0: Math.min(a[1], b[1]), z1: Math.max(a[1], b[1]) }
-}
-
-class Builder {
-  parts: FurniturePart[] = []
-  private y: number
-  private roomId: string
-  constructor(y: number, roomId: string) { this.y = y; this.roomId = roomId }
-  box(r: Rect, y0: number, y1: number, color: string, kind: string) {
-    if (r.x1 - r.x0 < 1e-3 || r.z1 - r.z0 < 1e-3 || y1 - y0 < 1e-3) return
-    this.parts.push({ cx: (r.x0 + r.x1) / 2, cz: (r.z0 + r.z1) / 2, cy: this.y + (y0 + y1) / 2, sx: r.x1 - r.x0, sz: r.z1 - r.z0, sy: y1 - y0, color, roomId: this.roomId, kind })
-  }
-}
-
-function placeAlong(I: Rect, side: Facing, w: number, d: number, blockers: Rect[], prefer: 'center' | 'start' | 'end', margin = 0.05): Rect | null {
-  const horizontal = side === 'N' || side === 'S'
-  const lo = (horizontal ? I.x0 : I.z0) + margin, hi = (horizontal ? I.x1 : I.z1) - margin - w
-  if (hi < lo - 1e-9 || d > (horizontal ? I.z1 - I.z0 : I.x1 - I.x0) + 1e-9) return null
-  const offs: number[] = []
-  for (let o = lo; o <= hi + 1e-9; o += 0.1) offs.push(o)
-  if (offs[offs.length - 1] < hi - 1e-9) offs.push(hi)
-  const mid = (lo + hi) / 2
-  if (prefer === 'center') offs.sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid))
-  else if (prefer === 'end') offs.reverse()
-  for (const o of offs) {
-    let r: Rect
-    switch (side) {
-      case 'N': r = { x0: o, x1: o + w, z0: I.z0, z1: I.z0 + d }; break
-      case 'S': r = { x0: o, x1: o + w, z0: I.z1 - d, z1: I.z1 }; break
-      case 'W': r = { x0: I.x0, x1: I.x0 + d, z0: o, z1: o + w }; break
-      default: r = { x0: I.x1 - d, x1: I.x1, z0: o, z1: o + w }
+/** Door swing + approach zones and window zones that fall on this room's walls. */
+export function zonesFor(room: RoomBox, openings: Opening[]): Zones {
+  const doors: Rect[] = [], windows: Rect[] = []
+  for (const o of openings) {
+    const half = o.width / 2 + 0.15
+    const reach = o.kind === 'door' ? Math.max(o.width, 0.9) + 0.1 : 0.45
+    let r: Rect | null = null
+    if (o.orientation === 'x') {
+      if (o.center < room.x0 - 0.05 || o.center > room.x1 + 0.05) continue
+      if (Math.abs(o.line - room.z0) <= 0.1) r = { x0: o.center - half, x1: o.center + half, z0: room.z0, z1: room.z0 + reach }
+      else if (Math.abs(o.line - room.z1) <= 0.1) r = { x0: o.center - half, x1: o.center + half, z0: room.z1 - reach, z1: room.z1 }
+    } else {
+      if (o.center < room.z0 - 0.05 || o.center > room.z1 + 0.05) continue
+      if (Math.abs(o.line - room.x0) <= 0.1) r = { x0: room.x0, x1: room.x0 + reach, z0: o.center - half, z1: o.center + half }
+      else if (Math.abs(o.line - room.x1) <= 0.1) r = { x0: room.x1 - reach, x1: room.x1, z0: o.center - half, z1: o.center + half }
     }
-    if (inside(r, I) && !blockers.some((b) => overlaps(r, b, 0.05))) return r
+    if (r) (o.kind === 'door' ? doors : windows).push(r)
+  }
+  return { doors, windows }
+}
+
+/** Why an item can't stand here (null = fine). `others` are the other items of the same room. */
+export function placementProblem(item: FurnitureItem, room: RoomBox, openings: Opening[], others: FurnitureItem[]): string | null {
+  const spec = specOf(item.type)
+  if (!spec) return 'Unknown furniture type.'
+  const I = interiorOf(room)
+  const r = itemRect(item)
+  if (!inside(r, I)) return 'Outside the room or touching a wall.'
+  const z = zonesFor(room, openings)
+  if (z.doors.some((d) => overlaps(r, d))) return 'Blocks a doorway or its door swing.'
+  if (spec.tall && z.windows.some((w) => overlaps(r, w))) return 'Stands in front of a window.'
+  if (!spec.overlay) {
+    for (const o of others) {
+      if (o.id === item.id) continue
+      const os = specOf(o.type)
+      if (!os || os.overlay) continue
+      if ((spec.mounted || os.mounted) && (spec.mounted !== os.mounted)) continue // sink on a counter, mirror above a basin
+      if (spec.mounted && os.mounted) { if (overlaps(r, itemRect(o), -0.02)) return 'Overlaps another item.'; continue }
+      if (overlaps(r, itemRect(o), 0.03)) return 'Overlaps another item.'
+    }
   }
   return null
 }
 
-export function buildFurniture(room: RoomBox, openings: Opening[]): FurniturePart[] {
-  const I: Rect = { x0: room.x0 + room.inset.W, x1: room.x1 - room.inset.E, z0: room.z0 + room.inset.N, z1: room.z1 - room.inset.S }
-  const iw = I.x1 - I.x0, id = I.z1 - I.z0
-  if (iw < 1.2 || id < 1.2 || room.overflow) return []
+const CELL = 0.1
+const AGENT = 0.25 // half the width of a walking person plus a little margin
 
-  // clear zones: door swings (incl. approach) and windows (for tall pieces)
-  const doorZones: Rect[] = [], windowZones: Rect[] = []
+/** Can people walk from every doorway through the room? (grid search around furniture, inflated by body width). */
+export function circulationOk(room: RoomBox, items: FurnitureItem[], openings: Opening[]): boolean {
+  const I = interiorOf(room)
+  const nx = Math.max(1, Math.round((I.x1 - I.x0) / CELL)), nz = Math.max(1, Math.round((I.z1 - I.z0) / CELL))
+  const obst = items.filter((i) => { const s = specOf(i.type); return s && !s.overlay && !s.mounted && s.h > 0.3 }).map((i) => itemRect(i))
+  const blocked = new Uint8Array(nx * nz)
+  let freeBase = 0
+  for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
+    const x = I.x0 + (i + 0.5) * CELL, z = I.z0 + (j + 0.5) * CELL
+    if (obst.some((r) => x > r.x0 - AGENT && x < r.x1 + AGENT && z > r.z0 - AGENT && z < r.z1 + AGENT)) blocked[i * nz + j] = 1
+    else freeBase++
+  }
+  const starts: [number, number][] = []
   for (const o of openings) {
-    const half = o.width / 2 + 0.15, reach = Math.max(o.width, 0.9) + 0.1
-    let onEdge = false, r: Rect | null = null
+    if (o.kind !== 'door') continue
+    let px: number, pz: number
     if (o.orientation === 'x') {
       if (o.center < room.x0 - 0.05 || o.center > room.x1 + 0.05) continue
-      if (Math.abs(o.line - room.z0) <= 0.1) { onEdge = true; r = { x0: o.center - half, x1: o.center + half, z0: room.z0, z1: room.z0 + reach } }
-      else if (Math.abs(o.line - room.z1) <= 0.1) { onEdge = true; r = { x0: o.center - half, x1: o.center + half, z0: room.z1 - reach, z1: room.z1 } }
+      if (Math.abs(o.line - room.z0) <= 0.1) { px = o.center; pz = room.z0 + 0.5 }
+      else if (Math.abs(o.line - room.z1) <= 0.1) { px = o.center; pz = room.z1 - 0.5 }
+      else continue
     } else {
       if (o.center < room.z0 - 0.05 || o.center > room.z1 + 0.05) continue
-      if (Math.abs(o.line - room.x0) <= 0.1) { onEdge = true; r = { x0: room.x0, x1: room.x0 + reach, z0: o.center - half, z1: o.center + half } }
-      else if (Math.abs(o.line - room.x1) <= 0.1) { onEdge = true; r = { x0: room.x1 - reach, x1: room.x1, z0: o.center - half, z1: o.center + half } }
+      if (Math.abs(o.line - room.x0) <= 0.1) { px = room.x0 + 0.5; pz = o.center }
+      else if (Math.abs(o.line - room.x1) <= 0.1) { px = room.x1 - 0.5; pz = o.center }
+      else continue
     }
-    if (!onEdge || !r) continue
-    if (o.kind === 'door') doorZones.push(r)
-    else windowZones.push(r)
+    const ci = Math.min(nx - 1, Math.max(0, Math.floor((px - I.x0) / CELL))), cj = Math.min(nz - 1, Math.max(0, Math.floor((pz - I.z0) / CELL)))
+    starts.push([ci, cj])
   }
+  if (!starts.length) return true
+  const seen = new Uint8Array(nx * nz)
+  const [si, sj] = starts[0]
+  if (blocked[si * nz + sj]) return false
+  const q: number[] = [si * nz + sj]
+  seen[si * nz + sj] = 1
+  let reach = 0
+  while (q.length) {
+    const c = q.pop() as number
+    reach++
+    const i = Math.floor(c / nz), j = c % nz
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const ni = i + di, nj = j + dj
+      if (ni < 0 || nj < 0 || ni >= nx || nj >= nz) continue
+      const k = ni * nz + nj
+      if (!seen[k] && !blocked[k]) { seen[k] = 1; q.push(k) }
+    }
+  }
+  if (starts.some(([i, j]) => !seen[i * nz + j])) return false // two doors must stay connected
+  return freeBase === 0 ? true : reach >= 0.45 * freeBase
+}
 
-  const b = new Builder(room.y, room.id)
-  const placed: Rect[] = []
-  const tryPlace = (sides: Facing[], w: number, d: number, prefer: 'center' | 'start' | 'end', tall = false, margin = 0.05): { rect: Rect; back: Facing } | null => {
-    const blockers = [...doorZones, ...placed, ...(tall ? windowZones : [])]
-    for (const s of sides) {
-      const r = placeAlong(I, s, w, d, blockers, prefer, margin)
-      if (r) { placed.push(r); return { rect: r, back: s } }
+/** Deterministic ids (room:type:n) so selection and saved edits survive re-generation. */
+function uniqueId(roomId: string, type: string, taken: Iterable<string>): string {
+  const t = new Set(taken)
+  let n = 1
+  while (t.has(`${roomId}:${type}:${n}`)) n++
+  return `${roomId}:${type}:${n}`
+}
+
+/** Working state for one room while placing furniture. */
+class Planner {
+  items: FurnitureItem[] = []
+  /** ids of items that exist elsewhere (kept by the user) and must not be reused */
+  reserved: string[] = []
+  readonly I: Rect
+  readonly zones: Zones
+  readonly room: RoomBox
+  readonly openings: Opening[]
+  readonly seed: number
+  constructor(room: RoomBox, openings: Opening[], seed = 0) {
+    this.seed = seed
+    this.room = room
+    this.openings = openings
+    this.I = interiorOf(room)
+    this.zones = zonesFor(room, openings)
+  }
+  newId(type: string) { return uniqueId(this.room.id, type, [...this.items.map((i) => i.id), ...this.reserved]) }
+  get iw() { return this.I.x1 - this.I.x0 }
+  get id() { return this.I.z1 - this.I.z0 }
+  mk(type: string, cx: number, cz: number, facing: Facing, w?: number, d?: number): FurnitureItem {
+    const s = FURNITURE_SPECS[type]
+    const sz = clampSize(type, w ?? s.w, d ?? s.d)
+    return { id: this.newId(type), room_id: this.room.id, type, cx, cz, w: sz.w, d: sz.d, facing }
+  }
+  ok(it: FurnitureItem) { return placementProblem(it, this.room, this.openings, this.items) === null }
+  add(it: FurnitureItem | null): FurnitureItem | null {
+    if (it && this.ok(it)) { this.items.push(it); return it }
+    return null
+  }
+  /** Stand `type` against `side`, sliding along the wall; `align` = preferred centre along the wall. */
+  against(type: string, side: Facing, prefer: 'center' | 'start' | 'end' | number = 'center', w?: number, d?: number, gap = 0.04): FurnitureItem | null {
+    const s = FURNITURE_SPECS[type]
+    const sz = clampSize(type, w ?? s.w, d ?? s.d)
+    const horiz = side === 'N' || side === 'S'
+    const lo = (horiz ? this.I.x0 : this.I.z0) + gap, hi = (horiz ? this.I.x1 : this.I.z1) - gap - sz.w
+    if (hi < lo - 1e-9 || sz.d > (horiz ? this.id : this.iw) + 1e-9) return null
+    const offs: number[] = []
+    for (let o = lo; o <= hi + 1e-9; o += 0.05) offs.push(o)
+    if (offs[offs.length - 1] < hi - 1e-9) offs.push(hi)
+    const target = typeof prefer === 'number' ? prefer - sz.w / 2 : prefer === 'center' ? (lo + hi) / 2 : prefer === 'start' ? lo : hi
+    offs.sort((a, b) => Math.abs(a - target) - Math.abs(b - target))
+    for (const o of offs) {
+      const along = o + sz.w / 2
+      const cx = horiz ? along : side === 'W' ? this.I.x0 + sz.d / 2 : this.I.x1 - sz.d / 2
+      const cz = horiz ? (side === 'N' ? this.I.z0 + sz.d / 2 : this.I.z1 - sz.d / 2) : along
+      const it = { id: this.newId(type), room_id: this.room.id, type, cx, cz, w: sz.w, d: sz.d, facing: side }
+      if (this.ok(it)) { this.items.push(it); return it }
     }
     return null
   }
-  const reserve = (r: Rect) => placed.push(r)
-  const freeAt = (r: Rect, tall = false) => inside(r, I) && ![...doorZones, ...placed, ...(tall ? windowZones : [])].some((z) => overlaps(r, z, 0.05))
-
-  const wallsByLength: Facing[] = (iw >= id ? ['N', 'S', 'W', 'E'] : ['W', 'E', 'N', 'S'])
-  const alongLen = (s: Facing) => (s === 'N' || s === 'S' ? iw : id)
-  const depthOf = (s: Facing) => (s === 'N' || s === 'S' ? id : iw)
-  const others = (s: Facing): Facing[] => wallsByLength.filter((x) => x !== s)
-  const legs = (r: Rect, h: number, color: string, kind: string, t = 0.05) => {
-    for (const [x, z] of [[r.x0, r.z0], [r.x1 - t, r.z0], [r.x0, r.z1 - t], [r.x1 - t, r.z1 - t]]) b.box({ x0: x, x1: x + t, z0: z, z1: z + t }, 0, h, color, kind)
+  /** Walls sorted by how far their middle is from the first door (far walls first). */
+  wallsFarFromDoor(): Facing[] {
+    const door = this.openings.find((o) => {
+      if (o.kind !== 'door') return false
+      return zonesFor(this.room, [o]).doors.length > 0
+    })
+    const mid = { N: [(this.I.x0 + this.I.x1) / 2, this.I.z0], S: [(this.I.x0 + this.I.x1) / 2, this.I.z1], W: [this.I.x0, (this.I.z0 + this.I.z1) / 2], E: [this.I.x1, (this.I.z0 + this.I.z1) / 2] } as Record<Facing, number[]>
+    const sides: Facing[] = this.iw >= this.id ? ['N', 'S', 'W', 'E'] : ['W', 'E', 'N', 'S']
+    const rot = (list: Facing[]) => { const k = this.seed % list.length; return [...list.slice(k), ...list.slice(0, k)] }
+    if (!door) return rot(sides)
+    const dp = door.orientation === 'x' ? [door.center, door.line] : [door.line, door.center]
+    return rot([...sides].sort((a, b) => Math.hypot(mid[b][0] - dp[0], mid[b][1] - dp[1]) - Math.hypot(mid[a][0] - dp[0], mid[a][1] - dp[1])))
   }
+  along(side: Facing) { return side === 'N' || side === 'S' ? this.iw : this.id }
+  depth(side: Facing) { return side === 'N' || side === 'S' ? this.id : this.iw }
+}
 
+const opposite = (f: Facing): Facing => (f === 'N' ? 'S' : f === 'S' ? 'N' : f === 'W' ? 'E' : 'W')
+/** Centre coordinate along the wall of `side` for an item. */
+const alongOf = (it: FurnitureItem, side: Facing) => (side === 'N' || side === 'S' ? it.cx : it.cz)
+/** Place an item in front of another item (distance `gap` from its front face), centred on it. */
+function inFront(p: Planner, base: FurnitureItem, type: string, gap: number, w?: number, d?: number): FurnitureItem | null {
+  const s = FURNITURE_SPECS[type]
+  const sz = clampSize(type, w ?? s.w, d ?? s.d)
+  const f = base.facing
+  const dist = base.d / 2 + gap + sz.d / 2
+  const cx = f === 'N' || f === 'S' ? base.cx : base.cx + (f === 'W' ? dist : -dist)
+  const cz = f === 'W' || f === 'E' ? base.cz : base.cz + (f === 'N' ? dist : -dist)
+  return p.add({ id: p.newId(type), room_id: p.room.id, type, cx, cz, w: sz.w, d: sz.d, facing: f })
+}
+
+function furnishBedroom(p: Planner) {
+  const area = p.iw * p.id
+  if (area < 5 || Math.min(p.iw, p.id) < 2.2) return
+  const double = Math.min(p.iw, p.id) >= 2.9 && area >= 8.5
+  let bed: FurnitureItem | null = null
+  for (const type of double ? ['bed_double', 'bed_single'] : ['bed_single']) {
+    for (const side of p.wallsFarFromDoor()) { bed = p.against(type, side, 'center'); if (bed) break }
+    if (bed) break
+  }
+  if (!bed) return
+  const back = bed.facing
+  for (const sgn of [-1, 1]) { // bedside tables on both sides of the headboard
+    const gapW = 0.04, along = alongOf(bed, back) + sgn * (bed.w / 2 + gapW + 0.2)
+    const cx = back === 'N' || back === 'S' ? along : bed.cx + (back === 'W' ? -(bed.d / 2) + 0.2 : bed.d / 2 - 0.2)
+    const cz = back === 'W' || back === 'E' ? along : bed.cz + (back === 'N' ? -(bed.d / 2) + 0.2 : bed.d / 2 - 0.2)
+    p.add(p.mk('nightstand', cx, cz, back))
+  }
+  const sides = p.wallsFarFromDoor().filter((s) => s !== back)
+  for (const s of sides) if (p.against('wardrobe', s, 'start', p.along(s) >= 3.2 ? 1.5 : 1.0)) break
+  if (area >= 12) {
+    for (const s of sides) {
+      const desk = p.against('desk', s, 'end', 1.2)
+      if (desk) { inFront(p, { ...desk }, 'office_chair', -0.1); break }
+    }
+  }
+  if (area >= 15) for (const s of sides) if (p.against('dresser', s, 'center')) break
+  if (area >= 11) { // rug under the foot of the bed
+    const rug = p.mk('rug', bed.cx + (back === 'W' ? bed.d / 2 : back === 'E' ? -bed.d / 2 : 0), bed.cz + (back === 'N' ? bed.d / 2 : back === 'S' ? -bed.d / 2 : 0), back, bed.w + 0.8, bed.d * 0.7)
+    p.add(rug)
+  }
+}
+
+function furnishLiving(p: Planner) {
+  const area = p.iw * p.id
+  if (area < 6 || Math.min(p.iw, p.id) < 2.0) return
+  // Pick a TV wall and the opposite sofa wall with enough room between them (sofa 0.9 + gap + table 0.5 + gap + TV 0.4 ~ 2.7 m).
+  let axes: Facing[][] = p.iw >= p.id ? [['N', 'S'], ['W', 'E']] : [['W', 'E'], ['N', 'S']]
+  if (p.seed % 2 === 1) axes = axes.map(([a, b]) => [b, a] as Facing[]) // regenerate: swap which wall carries the TV
+  let sofa: FurnitureItem | null = null, tv: FurnitureItem | null = null
+  for (const [a, b] of axes) {
+    if (p.depth(a) < 2.9) continue
+    for (const [tvSide, sofaSide] of [[a, b], [b, a]] as Facing[][]) {
+      const t = p.against('tv_unit', tvSide, 'center', Math.min(1.6, p.along(tvSide) - 0.6))
+      if (!t) continue
+      const wide = area >= 17 && Math.min(p.iw, p.id) >= 3.4
+      const s = p.against(wide ? 'sofa_l' : 'sofa', sofaSide, alongOf(t, tvSide), Math.min(wide ? 2.7 : 2.1, p.along(sofaSide) - 0.5))
+      if (s) { tv = t; sofa = s; break }
+      p.items.pop() // TV could not be matched with a sofa on that wall: take it back
+    }
+    if (sofa) break
+  }
+  if (!sofa) { // small / awkward room: sofa on the longest wall, no TV
+    for (const s of p.wallsFarFromDoor()) { sofa = p.against('sofa', s, 'center', Math.min(2.1, p.along(s) - 0.4)); if (sofa) break }
+  }
+  if (!sofa) return
+  const table = tv ? inFront(p, sofa, 'coffee_table', 0.45, 1.0, 0.5) : null
+  if (table && p.iw * p.id >= 12) {
+    const rug = p.mk('rug', table.cx, table.cz, table.facing, Math.min(2.4, p.along(table.facing) - 0.8), 1.6)
+    p.add(rug)
+  }
+  if (area >= 14) { // side tables flank the sofa
+    for (const sgn of [-1, 1]) {
+      const s = sofa
+      const along = alongOf(s, s.facing) + sgn * (s.w / 2 + 0.3)
+      const cx = s.facing === 'N' || s.facing === 'S' ? along : s.cx + (s.facing === 'W' ? -s.d / 2 + 0.25 : s.d / 2 - 0.25)
+      const cz = s.facing === 'W' || s.facing === 'E' ? along : s.cz + (s.facing === 'N' ? -s.d / 2 + 0.25 : s.d / 2 - 0.25)
+      p.add(p.mk('side_table', cx, cz, s.facing))
+    }
+  }
+  if (tv === null && area >= 14) p.against('bookshelf', p.wallsFarFromDoor()[0], 'center')
+}
+
+function furnishDining(p: Planner) {
+  if (Math.min(p.iw, p.id) < 2.4 || p.iw * p.id < 6) return
+  const alongX = p.iw >= p.id
+  const cx = (p.I.x0 + p.I.x1) / 2, cz = (p.I.z0 + p.I.z1) / 2
+  for (const [tw, td, perSide, ends] of [[1.6, 0.9, 2, 1], [1.2, 0.8, 2, 0]] as [number, number, number, number][]) {
+    const need = alongX ? [tw + 1.5, td + 1.5] : [td + 1.5, tw + 1.5]
+    if (p.iw < need[0] || p.id < need[1]) continue
+    const facing: Facing = alongX ? 'N' : 'W'
+    const table = p.mk('dining_table', cx, cz, facing, tw, td)
+    if (!p.add(table)) continue
+    const chairs: [number, number, Facing][] = []
+    for (let i = 0; i < perSide; i++) {
+      const u = -tw / 2 + (tw * (i + 0.5)) / perSide // evenly spaced slots, 0.6 m or more apart
+      if (alongX) { chairs.push([cx + u, cz - td / 2 - 0.26, 'N'], [cx + u, cz + td / 2 + 0.26, 'S']) } else { chairs.push([cx - td / 2 - 0.26, cz + u, 'W'], [cx + td / 2 + 0.26, cz + u, 'E']) }
+    }
+    if (ends) { if (alongX) chairs.push([cx - tw / 2 - 0.26, cz, 'W'], [cx + tw / 2 + 0.26, cz, 'E']); else chairs.push([cx, cz - tw / 2 - 0.26, 'N'], [cx, cz + tw / 2 + 0.26, 'S']) }
+    for (const [x, z, f] of chairs) p.add(p.mk('dining_chair', x, z, f))
+    return
+  }
+}
+
+function furnishKitchen(p: Planner) {
+  const area = p.iw * p.id
+  if (area < 4 || Math.min(p.iw, p.id) < 1.5) return
+  const sides = (p.iw >= p.id ? ['N', 'S', 'W', 'E'] : ['W', 'E', 'N', 'S']) as Facing[]
+  let counter: FurnitureItem | null = null
+  for (const side of sides) {
+    if (p.depth(side) < 1.5) continue // leave a working aisle
+    const run = Math.min(3.6, p.along(side) - 0.9)
+    for (let len = run; len >= 1.4 && !counter; len -= 0.2) counter = p.against('counter', side, 'center', len)
+    if (counter) break
+  }
+  if (!counter) return
+  const f = counter.facing
+  const at = (frac: number) => alongOf(counter as FurnitureItem, f) - counter.w / 2 + counter.w * frac
+  const pos = (frac: number, d: number) => {
+    const along = at(frac)
+    return f === 'N' || f === 'S'
+      ? [along, f === 'N' ? counter!.cz - counter!.d / 2 + d / 2 : counter!.cz + counter!.d / 2 - d / 2]
+      : [f === 'W' ? counter!.cx - counter!.d / 2 + d / 2 : counter!.cx + counter!.d / 2 - d / 2, along]
+  }
+  const put = (type: string, frac: number) => {
+    const s = FURNITURE_SPECS[type]
+    const [x, z] = pos(frac, s.d)
+    return p.add(p.mk(type, x, z, f))
+  }
+  if (counter.w >= 1.9) { put('sink', 0.25); put('stove', 0.68) } else put('sink', 0.5)
+  // refrigerator at the end of the counter, or on another wall
+  let fridge: FurnitureItem | null = null
+  const endAlong = alongOf(counter, f) + counter.w / 2 + 0.35 + 0.02
+  const fx = f === 'N' || f === 'S' ? endAlong : counter.cx
+  const fz = f === 'N' || f === 'S' ? counter.cz : endAlong
+  const probe = p.mk('fridge', fx, f === 'N' || f === 'S' ? (f === 'N' ? p.I.z0 + 0.35 : p.I.z1 - 0.35) : fz, f)
+  const probe2 = f === 'N' || f === 'S' ? probe : { ...probe, cx: f === 'W' ? p.I.x0 + 0.35 : p.I.x1 - 0.35, cz: fz }
+  fridge = p.add(probe2)
+  if (!fridge) for (const s of sides.filter((x) => x !== f)) { fridge = p.against('fridge', s, 'start'); if (fridge) break }
+  if (area >= 9 && p.depth(f) >= 3.2 && Math.min(p.iw, p.id) >= 2.8) { // second run keeps the work triangle compact
+    for (const s of sides.filter((x) => x !== f && x !== opposite(f))) if (p.against('counter', s, 'start', Math.min(1.8, p.along(s) - 1.4))) break
+  }
+  if (area >= 14 && Math.min(p.iw, p.id) >= 3.6) { // island / dining counter, 0.9 m clear all round
+    p.add(p.mk('island', (p.I.x0 + p.I.x1) / 2, (p.I.z0 + p.I.z1) / 2, p.iw >= p.id ? 'N' : 'W', 1.6, 0.8))
+  }
+}
+
+function furnishBathroom(p: Planner) {
+  const area = p.iw * p.id
+  if (area < 1.6 || Math.min(p.iw, p.id) < 1.1) return
+  const sides = p.wallsFarFromDoor()
+  for (const s of sides) if (p.against('toilet', s, 'end')) break
+  let basin: FurnitureItem | null = null
+  for (const s of sides) { basin = p.against('basin', s, 'start'); if (basin) break }
+  if (basin) {
+    const mirror = p.mk('mirror', basin.cx, basin.cz, basin.facing, 0.6, 0.04)
+    const f = basin.facing
+    if (f === 'N') mirror.cz = p.I.z0 + 0.02; else if (f === 'S') mirror.cz = p.I.z1 - 0.02; else if (f === 'W') mirror.cx = p.I.x0 + 0.02; else mirror.cx = p.I.x1 - 0.02
+    p.add(mirror)
+  }
+  if (area >= 6 && Math.max(p.iw, p.id) >= 2.4) { for (const s of sides) if (p.against('bathtub', s, 'center')) break }
+  else if (area >= 2.8 && Math.min(p.iw, p.id) >= 1.6) {
+    for (const s of sides) { const sh = p.against('shower', s, 'end', 0.9, 0.9, 0.02); if (sh) break }
+  }
+}
+
+function furnishStudy(p: Planner) {
+  if (p.iw * p.id < 4 || Math.min(p.iw, p.id) < 1.8) return
+  const sides = p.wallsFarFromDoor()
+  for (const s of sides) {
+    const desk = p.against('desk', s, 'center', Math.min(1.5, p.along(s) - 0.4))
+    if (desk) { inFront(p, { ...desk }, 'office_chair', -0.1); break }
+  }
+  for (const s of sides) if (p.against('bookshelf', s, 'center')) break
+  if (p.iw * p.id >= 9) for (const s of sides) if (p.against('wardrobe', s, 'start', 0.9)) break
+}
+
+/**
+ * Automatic arrangement for one room. Returns an empty list for circulation space (passage, stairs) and unknown rooms.
+ * The result is always checked: every doorway must stay connected by a walkable path; if not, items are removed.
+ */
+export function furnishRoom(room: RoomBox, openings: Opening[], seed = 0): FurnitureItem[] {
+  const p = new Planner(room, openings, seed)
+  if (p.iw < 1.1 || p.id < 1.1 || room.overflow) return []
   switch (room.type) {
-    case 'bedroom': {
-      if (iw * id < 5) break
-      const double = Math.min(iw, id) >= 2.9 && iw * id >= 8
-      const bw = double ? 1.55 : 0.95, bl = 1.95
-      const bed = tryPlace(wallsByLength, bw, bl, 'center')
-      if (bed) {
-        const { rect, back } = bed
-        const U = bw, V = bl
-        b.box(sub(rect, back, 0, U, 0, V), 0, 0.28, C.wood, 'bed')
-        b.box(sub(rect, back, 0.03, U - 0.03, 0.03, V - 0.03), 0.28, 0.5, C.linen, 'mattress')
-        b.box(sub(rect, back, 0, U, 0, 0.08), 0.28, 1.0, C.woodDark, 'headboard')
-        b.box(sub(rect, back, 0.03, U - 0.03, 0.95, V - 0.03), 0.5, 0.53, C.blanket, 'blanket')
-        if (double) { b.box(sub(rect, back, 0.15, 0.7, 0.15, 0.5), 0.5, 0.6, C.white, 'pillow'); b.box(sub(rect, back, U - 0.7, U - 0.15, 0.15, 0.5), 0.5, 0.6, C.white, 'pillow') }
-        else b.box(sub(rect, back, 0.2, U - 0.2, 0.15, 0.5), 0.5, 0.6, C.white, 'pillow')
-        for (const side of [-1, 1] as const) {
-          const u0 = side < 0 ? -0.45 : U + 0.05
-          const nr = sub(rect, back, u0, u0 + 0.4, 0, 0.4)
-          if (freeAt(nr)) { reserve(nr); b.box(nr, 0, 0.5, C.wood, 'nightstand'); b.box({ x0: nr.x0 + 0.04, x1: nr.x1 - 0.04, z0: nr.z0 + 0.04, z1: nr.z1 - 0.04 }, 0.5, 0.52, C.woodDark, 'nightstand') }
-        }
-        const wd = tryPlace(others(back), 1.2, 0.55, 'start', true)
-        if (wd) b.box(wd.rect, 0, 2.0, C.wardrobe, 'wardrobe')
-      }
-      break
-    }
-    case 'living': {
-      const sofaSides = wallsByLength.filter((s) => alongLen(s) >= 2.5 && depthOf(s) >= 3.0)
-      const sofa = tryPlace(sofaSides.length ? sofaSides : wallsByLength, 2.0, 0.9, 'center')
-      if (sofa) {
-        const { rect, back } = sofa
-        b.box(sub(rect, back, 0, 2.0, 0, 0.9), 0, 0.4, C.fabric, 'sofa')
-        b.box(sub(rect, back, 0, 2.0, 0, 0.22), 0.4, 0.88, C.fabric, 'sofa')
-        b.box(sub(rect, back, 0, 0.2, 0.22, 0.9), 0.4, 0.62, C.fabric, 'sofa')
-        b.box(sub(rect, back, 1.8, 2.0, 0.22, 0.9), 0.4, 0.62, C.fabric, 'sofa')
-        b.box(sub(rect, back, 0.2, 1.8, 0.22, 0.9), 0.4, 0.5, C.fabricLight, 'cushion')
-        const table = sub(rect, back, 0.5, 1.5, 1.15, 1.65)
-        if (freeAt(table)) { reserve(table); b.box(table, 0.36, 0.4, C.woodLight, 'coffee-table'); legs(table, 0.36, C.woodDark, 'coffee-table', 0.04) }
-        const opposite: Facing = back === 'N' ? 'S' : back === 'S' ? 'N' : back === 'W' ? 'E' : 'W'
-        if (depthOf(back) >= 3.4) {
-          const tv = tryPlace([opposite], 1.4, 0.4, 'center')
-          if (tv) { b.box(tv.rect, 0, 0.45, C.woodDark, 'tv-unit'); b.box(sub(tv.rect, tv.back, 0.2, 1.2, 0.15, 0.2), 0.55, 1.05, C.black, 'tv') }
-        }
-      }
-      break
-    }
-    case 'dining': {
-      const small = iw < 2.8 || id < 2.8
-      const tw = small ? 1.2 : 1.6, td = small ? 0.8 : 0.9
-      const alongX = iw >= id
-      const cx = (I.x0 + I.x1) / 2, cz = (I.z0 + I.z1) / 2
-      const t: Rect = alongX ? { x0: cx - tw / 2, x1: cx + tw / 2, z0: cz - td / 2, z1: cz + td / 2 } : { x0: cx - td / 2, x1: cx + td / 2, z0: cz - tw / 2, z1: cz + tw / 2 }
-      if (!freeAt({ x0: t.x0 - 0.5, x1: t.x1 + 0.5, z0: t.z0 - 0.5, z1: t.z1 + 0.5 })) break
-      reserve({ x0: t.x0 - 0.5, x1: t.x1 + 0.5, z0: t.z0 - 0.5, z1: t.z1 + 0.5 })
-      b.box(t, 0.72, 0.76, C.woodLight, 'dining-table'); legs(t, 0.72, C.woodDark, 'dining-table')
-      const n = small ? 1 : 2
-      for (let i = 0; i < n; i++) for (const sgn of [-1, 1] as const) {
-        const f = (i + 1) / (n + 1)
-        const c = 0.21
-        if (alongX) {
-          const x = t.x0 + (t.x1 - t.x0) * f, z = sgn < 0 ? t.z0 - 0.08 - c : t.z1 + 0.08 + c
-          b.box({ x0: x - c, x1: x + c, z0: z - c, z1: z + c }, 0.42, 0.46, C.chair, 'chair')
-          b.box({ x0: x - c, x1: x + c, z0: sgn < 0 ? z - c - 0.04 : z + c, z1: sgn < 0 ? z - c : z + c + 0.04 }, 0.46, 0.9, C.chair, 'chair')
-        } else {
-          const z = t.z0 + (t.z1 - t.z0) * f, x = sgn < 0 ? t.x0 - 0.08 - c : t.x1 + 0.08 + c
-          b.box({ x0: x - c, x1: x + c, z0: z - c, z1: z + c }, 0.42, 0.46, C.chair, 'chair')
-          b.box({ x0: sgn < 0 ? x - c - 0.04 : x + c, x1: sgn < 0 ? x - c : x + c + 0.04, z0: z - c, z1: z + c }, 0.46, 0.9, C.chair, 'chair')
-        }
-      }
-      break
-    }
-    case 'kitchen': {
-      const sides = wallsByLength.filter((s) => alongLen(s) >= 1.8)
-      const run = Math.min(3.0, Math.max(...wallsByLength.map(alongLen)) - 0.1)
-      let counter: { rect: Rect; back: Facing } | null = null
-      let len = run
-      for (; len >= 1.6 && !counter; len -= 0.4) counter = tryPlace(sides.length ? sides : wallsByLength, len, 0.6, 'center')
-      len += 0.4
-      if (counter) {
-        const { rect, back } = counter
-        b.box(sub(rect, back, 0, len, 0, 0.6), 0, 0.88, C.cabinet, 'counter')
-        b.box(sub(rect, back, 0, len, 0, 0.62), 0.88, 0.92, C.worktop, 'worktop')
-        b.box(sub(rect, back, len * 0.2, len * 0.2 + 0.55, 0.08, 0.5), 0.9, 0.93, C.steel, 'sink')
-        b.box(sub(rect, back, len * 0.62, len * 0.62 + 0.55, 0.05, 0.55), 0.92, 0.94, C.black, 'hob')
-        const fr = tryPlace(others(back), 0.7, 0.7, 'start', true)
-        if (fr) b.box(fr.rect, 0, 1.8, C.fridge, 'fridge')
-      }
-      break
-    }
-    case 'bathroom': {
-      if (iw * id < 2.2) break
-      const wc = tryPlace(wallsByLength, 0.4, 0.65, 'end')
-      if (wc) {
-        b.box(sub(wc.rect, wc.back, 0.02, 0.38, 0.2, 0.65), 0, 0.4, C.porcelain, 'toilet')
-        b.box(sub(wc.rect, wc.back, 0.02, 0.38, 0, 0.2), 0, 0.8, C.porcelain, 'toilet')
-      }
-      const basin = tryPlace(wallsByLength, 0.55, 0.42, 'start')
-      if (basin) { b.box(basin.rect, 0, 0.8, C.cabinet, 'vanity'); b.box(sub(basin.rect, basin.back, 0.05, 0.5, 0.04, 0.38), 0.8, 0.86, C.porcelain, 'basin') }
-      if (Math.min(iw, id) >= 1.7) {
-        const shower = tryPlace(wallsByLength, 0.9, 0.9, 'end', false, 0.02)
-        if (shower) b.box(shower.rect, 0, 0.05, C.water, 'shower')
-      }
-      if (iw * id >= 5 && Math.max(iw, id) >= 2.4) {
-        const tub = tryPlace(wallsByLength, 1.6, 0.75, 'start')
-        if (tub) { b.box(tub.rect, 0, 0.5, C.porcelain, 'tub'); b.box({ x0: tub.rect.x0 + 0.06, x1: tub.rect.x1 - 0.06, z0: tub.rect.z0 + 0.06, z1: tub.rect.z1 - 0.06 }, 0.5, 0.52, C.water, 'tub') }
-      }
-      break
-    }
-    case 'study':
-    case 'office': {
-      if (iw * id < 4) break
-      const desk = tryPlace(wallsByLength, 1.4, 0.65, 'center')
-      if (desk) {
-        const { rect, back } = desk
-        b.box(sub(rect, back, 0, 1.4, 0, 0.65), 0.72, 0.76, C.woodLight, 'desk')
-        b.box(sub(rect, back, 0, 0.04, 0, 0.65), 0, 0.72, C.wood, 'desk'); b.box(sub(rect, back, 1.36, 1.4, 0, 0.65), 0, 0.72, C.wood, 'desk')
-        const chair = sub(rect, back, 0.5, 0.95, 0.75, 1.2)
-        if (freeAt(chair)) { reserve(chair); b.box(chair, 0.42, 0.47, C.fabric, 'chair'); b.box(sub(rect, back, 0.5, 0.95, 1.16, 1.2), 0.47, 0.95, C.fabric, 'chair') }
-        const shelf = tryPlace(others(back), 0.9, 0.3, 'center', true)
-        if (shelf) b.box(shelf.rect, 0, 1.8, C.wood, 'bookshelf')
-      }
-      break
-    }
-    default:
-      break
+    case 'bedroom': furnishBedroom(p); break
+    case 'living': furnishLiving(p); break
+    case 'dining': furnishDining(p); break
+    case 'kitchen': furnishKitchen(p); break
+    case 'bathroom': furnishBathroom(p); break
+    case 'study': case 'office': furnishStudy(p); break
+    default: break
   }
-  return b.parts
+  const removable = () => p.items.map((i, k) => ({ i, k })).reverse().find(({ i }) => !specOf(i.type)?.overlay)
+  while (p.items.length && !circulationOk(room, p.items, openings)) {
+    const r = removable()
+    if (!r) break
+    p.items.splice(r.k, 1)
+  }
+  return p.items
+}
+
+/** Position for a newly added piece: scans the room for the first spot where it fits (against walls first). */
+export function findFreeSpot(room: RoomBox, openings: Opening[], others: FurnitureItem[], type: string): FurnitureItem | null {
+  const spec = specOf(type)
+  if (!spec) return null
+  const p = new Planner(room, openings)
+  p.items = [...others]
+  const sides: Facing[] = ['N', 'S', 'W', 'E']
+  if (!spec.mounted && !spec.overlay) {
+    for (const s of sides) {
+      const it = p.against(type, s, 'center')
+      if (it && circulationOk(room, p.items, openings)) return it
+      if (it) p.items.pop()
+    }
+  }
+  // free-standing: scan the floor
+  const I = p.I
+  for (let z = I.z0 + spec.d / 2; z <= I.z1 - spec.d / 2 + 1e-9; z += 0.1) for (let x = I.x0 + spec.w / 2; x <= I.x1 - spec.w / 2 + 1e-9; x += 0.1) {
+    const it: FurnitureItem = { id: uniqueId(room.id, type, others.map((o) => o.id)), room_id: room.id, type, cx: x, cz: z, w: spec.w, d: spec.d, facing: 'N' }
+    if (placementProblem(it, room, openings, others) === null && circulationOk(room, [...others, it], openings)) return it
+  }
+  return null
 }

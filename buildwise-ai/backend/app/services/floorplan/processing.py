@@ -107,3 +107,88 @@ def analyze_image(data: bytes, canny_low: int = 60, canny_high: int = 160, min_c
             "Confirm or enter room dimensions manually."
         ),
     }
+
+
+def detect_rooms(data: bytes, max_side: int = 1100) -> dict:
+    """Propose rectangular room candidates from a floor-plan image (walls = dark strokes).
+
+    Method: Otsu threshold -> dilate walls to seal door gaps -> connected components of the remaining free space ->
+    discard the outside and tiny regions -> bounding rectangles. This is a *heuristic*: it works on clean plans with
+    closed walls, it cannot read room names, doors, windows or dimension text, and L-shaped rooms are approximated by
+    their bounding rectangle (flagged via `rectangular`). The caller must have the user review and confirm everything.
+    Coordinates are returned in ORIGINAL image pixels.
+    """
+    try:
+        import cv2
+        import numpy as np
+    except Exception as exc:  # pragma: no cover
+        raise UploadError("OpenCV is not installed; room detection is unavailable.") from exc
+    arr = np.frombuffer(data, dtype=np.uint8)
+    color = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if color is None:
+        raise UploadError("The image could not be decoded.")
+    oh, ow = color.shape[:2]
+    f = min(1.0, max_side / max(oh, ow))
+    if f < 1.0:
+        color = cv2.resize(color, (int(ow * f), int(oh * f)), interpolation=cv2.INTER_AREA)
+    gray = cv2.cvtColor(color, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+    side = max(h, w)
+    pad = int(0.1 * side) + 2
+    gray = cv2.copyMakeBorder(gray, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)  # guarantees an "outside"
+    blur = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, walls = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    min_area = 0.008 * h * w
+
+    def rooms_for(k: int):
+        """Dilating the walls by k seals door gaps up to k px wide; too large a k erodes small rooms away."""
+        sealed = cv2.dilate(walls, np.ones((k, k), np.uint8))
+        free = (sealed == 0).astype(np.uint8)
+        n, labels, stats, _ = cv2.connectedComponentsWithStats(free, connectivity=4)
+        outside, half, found = labels[0, 0], k // 2, []
+        for i in range(1, n):
+            if i == outside:
+                continue
+            x, y, bw, bh, area = stats[i]
+            if area < min_area or max(bw, bh) / max(1, min(bw, bh)) > 12:
+                continue
+            # Fill ratio from the region's OUTER outline, so text/furniture holes inside a room don't look like an L-shape.
+            mask = (labels[y:y + bh, x:x + bw] == i).astype(np.uint8)
+            cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            outline = max((cv2.contourArea(c) for c in cnts), default=float(area))
+            fill = max(float(area), outline) / float(max(1, bw * bh))
+            found.append({"x": x - half - pad, "y": y - half - pad, "w": bw + 2 * half, "h": bh + 2 * half,
+                          "fill_ratio": round(fill, 2), "rectangular": fill >= 0.82})
+        return found
+
+    # The best seal size is the one that separates the most rooms (smallest k wins ties).
+    best, best_k = [], 0
+    for frac in (0.02, 0.035, 0.05, 0.07, 0.09):
+        k = max(5, int(round(frac * side)))
+        found = rooms_for(k)
+        if len(found) > len(best):
+            best, best_k = found, k
+    rooms = best
+    rooms.sort(key=lambda r: (round(r["y"] / (0.08 * h)), r["x"]))
+    overlay = cv2.copyMakeBorder(color, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+    for idx, r in enumerate(rooms, 1):
+        r["index"] = idx
+        cv2.rectangle(overlay, (r["x"] + pad, r["y"] + pad), (r["x"] + r["w"] + pad, r["y"] + r["h"] + pad), (0, 120, 255), 2)
+        cv2.putText(overlay, str(idx), (r["x"] + pad + 6, r["y"] + pad + 24), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 80, 220), 2)
+    overlay = overlay[pad:-pad, pad:-pad]
+    ok, png = cv2.imencode(".png", overlay)
+    if not ok:
+        raise UploadError("Could not render the detection preview.")
+    inv = 1.0 / f
+    for r in rooms:  # back to original image pixels
+        r["x"], r["y"], r["w"], r["h"] = (int(round(r[c] * inv)) for c in ("x", "y", "w", "h"))
+    warnings = []
+    if not rooms:
+        warnings.append("No closed rooms were found. The walls may have gaps larger than a door, or the plan is a photo/sketch. Enter rooms manually.")
+    if any(not r["rectangular"] for r in rooms):
+        warnings.append("Some regions are not rectangular (L-shapes, curves). They are approximated by their bounding rectangle: check and correct them.")
+    return {
+        "rooms": rooms, "image_size": [ow, oh], "overlay_png": png.tobytes(), "warnings": warnings,
+        "disclaimer": "Detected rooms are suggestions only. Names, doors, windows and dimension text are NOT read from the image. "
+                      "Review every room and confirm before generating the 3D model.",
+    }

@@ -199,7 +199,8 @@ function EstimationBody({ projectId }: { projectId: string }) {
 function ExtraNotes({ estimate, project }: { estimate: Estimate; project: ProjectDetail }) {
   return (
     <p className="text-xs text-slate-500">
-      Last calculated {estimate.created_at ? new Date(estimate.created_at).toLocaleString() : 'just now'} for “{project.name}”. Estimates are rule-based calculations, not machine-learning predictions.
+      Last calculated {estimate.created_at ? new Date(estimate.created_at).toLocaleString() : 'just now'} for “{project.name}”.
+      Openings deducted from walls: {estimate.geometry.door_count ?? 0} door(s) and {estimate.geometry.window_count ?? 0} window(s), {estimate.geometry.openings_source ?? 'estimated from room counts'} (open the 3D Studio and save the layout to use its exact doors and windows). Estimates are rule-based calculations, not machine-learning predictions.
       Prices come from your <Link className="underline" to="/prices">price list</Link> (sample prices are placeholders).
     </p>
   )
