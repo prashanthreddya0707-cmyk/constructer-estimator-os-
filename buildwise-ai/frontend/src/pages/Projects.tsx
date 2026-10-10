@@ -26,7 +26,7 @@ export default function Projects() {
   const list = (data ?? []).filter((p) => (p.name + p.location + p.owner_name).toLowerCase().includes(q.toLowerCase()))
   return (
     <>
-      <PageHeader title="My projects" description="All your saved projects and estimates." actions={<Link to="/projects/new"><Button variant="accent"><Plus className="h-4 w-4" /> New project</Button></Link>} />
+      <PageHeader title="My projects" description="All your saved projects and estimates." actions={<div className="flex gap-2"><Button variant="outline" onClick={async () => { try { const p = await api.seedDemo(); toast.success('Demo project created: opening the 3D Studio.'); navigate(`/studio/${p.id}`) } catch (e) { toast.error(e instanceof Error ? e.message : 'Failed') } }}><Box className="h-4 w-4" /> Load demo &amp; open 3D</Button><Link to="/projects/new"><Button variant="accent"><Plus className="h-4 w-4" /> New project</Button></Link></div>} />
       {loading && <Spinner />}
       {error && <ErrorState message={error} onRetry={reload} />}
       {data && data.length === 0 && (

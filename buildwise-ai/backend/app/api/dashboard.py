@@ -16,9 +16,9 @@ router = APIRouter(tags=["dashboard"])
 DEMO_ROOMS = [
     ("Living Room", "living", 5.0, 4.0, 1, 2, 2, 0.0, 0.0), ("Kitchen", "kitchen", 5.0, 4.0, 1, 1, 2, 5.0, 0.0),
     ("Master Bedroom", "bedroom", 5.0, 4.0, 1, 1, 2, 0.0, 4.0), ("Bathroom", "bathroom", 2.5, 4.0, 1, 1, 0, 5.0, 4.0),
-    ("Store", "store", 2.5, 4.0, 1, 1, 1, 7.5, 4.0),
+    ("Staircase", "staircase", 2.5, 4.0, 1, 1, 0, 7.5, 4.0),
     ("Bedroom 2", "bedroom", 5.0, 4.0, 2, 1, 2, 0.0, 0.0), ("Study", "study", 5.0, 4.0, 2, 1, 2, 5.0, 0.0),
-    ("Bathroom 2", "bathroom", 2.5, 4.0, 2, 1, 1, 0.0, 4.0), ("Landing", "corridor", 7.5, 4.0, 2, 1, 1, 2.5, 4.0),
+    ("Bathroom 2", "bathroom", 2.5, 4.0, 2, 1, 1, 0.0, 4.0), ("Landing", "corridor", 5.0, 4.0, 2, 1, 1, 2.5, 4.0), ("Staircase 2", "staircase", 2.5, 4.0, 2, 1, 0, 7.5, 4.0),
 ]
 
 
