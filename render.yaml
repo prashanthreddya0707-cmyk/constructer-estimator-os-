@@ -1,0 +1,16 @@
+# Render blueprint for the BuildWise AI backend (FastAPI + SQLite).
+services:
+  - type: web
+    name: buildwise-api
+    runtime: python
+    rootDir: buildwise-ai/backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.3"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false   # set to your Netlify URL, e.g. https://your-site.netlify.app

@@ -141,6 +141,13 @@ cd frontend && npm run build        # outputs frontend/dist (serve with any stat
 cd backend  && uvicorn app.main:app --host 0.0.0.0 --port 8000   # behind a reverse proxy, with JWT_SECRET set
 ```
 
+## Deploying (Netlify + Render)
+
+Netlify serves only the static frontend; the FastAPI backend needs a Python host (a `render.yaml` blueprint is included).
+
+1. **Backend (Render):** New > Blueprint > pick this repo. After it deploys, set `CORS_ORIGINS` to your Netlify URL. Note: on Render's free plan the SQLite file resets on redeploy/restart (fine for demos; use a persistent disk or PostgreSQL for real data).
+2. **Frontend (Netlify):** Add new site > Import from Git > this repo (`netlify.toml` sets base/build/publish). Under Site configuration > Environment variables add `VITE_API_BASE_URL` = your Render URL (no trailing slash), then redeploy.
+
 ## Troubleshooting
 
 | Symptom | Fix |

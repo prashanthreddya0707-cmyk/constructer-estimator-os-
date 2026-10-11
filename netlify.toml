@@ -1,0 +1,15 @@
+# Netlify hosts the React frontend only. The FastAPI backend runs elsewhere (see render.yaml);
+# set VITE_API_BASE_URL in Netlify's environment variables to that backend's URL.
+[build]
+  base    = "buildwise-ai/frontend"
+  command = "npm ci && npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# Single-page app: every path serves index.html so refreshes and deep links work.
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
