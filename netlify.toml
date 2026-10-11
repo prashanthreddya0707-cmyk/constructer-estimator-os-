@@ -8,6 +8,13 @@
 [build.environment]
   NODE_VERSION = "22"
 
+# Forward API calls to the backend so visitors only ever see this site's address.
+[[redirects]]
+  from   = "/api/*"
+  to     = "https://buildwise-ai-4294.onrender.com/api/:splat"
+  status = 200
+  force  = true
+
 # Single-page app: every path serves index.html so refreshes and deep links work.
 [[redirects]]
   from   = "/*"
