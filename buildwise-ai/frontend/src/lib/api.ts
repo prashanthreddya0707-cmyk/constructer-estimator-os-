@@ -5,7 +5,6 @@ import type {
 import type { SavedLayout } from '@/features/building-3d/layoutStore'
 
 const BASE = `${(import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''}/api`
-const TOKEN_KEY = 'bw_token'
 
 export class ApiError extends Error {
   status: number
@@ -15,10 +14,15 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The login session lives in an httpOnly cookie set by the server, which page scripts cannot read, so nothing secret is
+ * kept in localStorage. This in-memory copy only covers the current page (e.g. when cookies are blocked); it vanishes on reload.
+ */
+let memoryToken: string | null = null
 export const tokenStore = {
-  get: () => { try { return localStorage.getItem(TOKEN_KEY) } catch { return null } },
-  set: (t: string) => { try { localStorage.setItem(TOKEN_KEY, t) } catch { /* storage unavailable */ } },
-  clear: () => { try { localStorage.removeItem(TOKEN_KEY) } catch { /* storage unavailable */ } },
+  get: () => memoryToken,
+  set: (t: string) => { memoryToken = t },
+  clear: () => { memoryToken = null },
 }
 
 type Listener = () => void
@@ -32,7 +36,7 @@ async function raw(path: string, init: RequestInit = {}): Promise<Response> {
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   let res: Response
   try {
-    res = await fetch(`${BASE}${path}`, { ...init, headers })
+    res = await fetch(`${BASE}${path}`, { ...init, headers, credentials: 'same-origin' })
   } catch {
     throw new ApiError('Cannot reach the BuildWise AI server. Check that the backend is running and try again.', 0)
   }
@@ -43,7 +47,7 @@ async function raw(path: string, init: RequestInit = {}): Promise<Response> {
       const body = await res.json()
       msg = body?.error?.message ?? body?.detail ?? msg
     } catch { /* non-JSON error */ }
-    if (res.status === 401 && token) { tokenStore.clear(); onUnauthorized?.() }
+    if (res.status === 401 && !path.startsWith('/auth/')) { tokenStore.clear(); onUnauthorized?.() }
     throw new ApiError(msg, res.status)
   }
   return res
@@ -62,6 +66,7 @@ export const api = {
   signup: (d: { email: string; full_name: string; password: string }) => json<{ access_token: string; user: User }>('/auth/signup', { method: 'POST', body: body(d) }),
   login: (d: { email: string; password: string }) => json<{ access_token: string; user: User }>('/auth/login', { method: 'POST', body: body(d) }),
   me: () => json<User>('/auth/me'),
+  logout: () => json<void>('/auth/logout', { method: 'POST' }),
   updateMe: (full_name: string) => json<User>('/auth/me', { method: 'PUT', body: body({ full_name }) }),
   // dashboard / demo
   dashboard: () => json<Dashboard>('/dashboard'),

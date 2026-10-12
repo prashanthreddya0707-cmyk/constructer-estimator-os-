@@ -42,10 +42,17 @@ class Settings:
         self.seed_sample_data = os.environ.get("SEED_SAMPLE_DATA", "true").lower() == "true"
         self.jwt_secret = os.environ.get("JWT_SECRET") or self._dev_secret()
         self.jwt_algorithm = "HS256"
+        # Credentials live in their own database file, encrypted with a key kept outside that file.
+        self.auth_database_url = os.environ.get("AUTH_DATABASE_URL", f"sqlite:///{self.data_dir / 'auth.db'}")
+        self.auth_secret = os.environ.get("AUTH_ENCRYPTION_KEY") or self._dev_key(".auth_key")
+        self.cookie_name = "bw_session"
 
     def _dev_secret(self) -> str:
         """No JWT_SECRET configured: generate one and keep it in the (git-ignored) data dir."""
-        path = self.data_dir / ".dev_jwt_secret"
+        return self._dev_key(".dev_jwt_secret")
+
+    def _dev_key(self, filename: str) -> str:
+        path = self.data_dir / filename
         if path.is_file():
             return path.read_text().strip()
         secret = secrets.token_urlsafe(48)

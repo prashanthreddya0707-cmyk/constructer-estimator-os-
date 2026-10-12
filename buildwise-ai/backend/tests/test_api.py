@@ -29,6 +29,7 @@ def test_auth_flow(client):
     me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {ok['access_token']}"})
     assert me.json()["email"] == "a@x.com"
     assert "password" not in me.text
+    client.cookies.clear()
     assert client.get("/api/projects").status_code == 401
     assert client.get("/api/projects", headers={"Authorization": "Bearer garbage"}).status_code == 401
 
