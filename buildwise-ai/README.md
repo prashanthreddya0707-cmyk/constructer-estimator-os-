@@ -174,3 +174,7 @@ Netlify serves only the static frontend; the FastAPI backend needs a Python host
 * Columns, beams and footings are not detailed; use the *frame concrete allowance* assumption and have an engineer design them.
 * No Alembic migrations, e-mail verification, password reset or rate limiting (see Authentication).
 * Dashboard "material quantities" combine different units on one chart (tooltips show units).
+
+## Using a server database (PostgreSQL / Supabase)
+
+By default data lives in SQLite files (`data/buildwise.db`, `data/auth.db`). To keep data permanently, set `DATABASE_URL` to a PostgreSQL URL (e.g. the Supabase **Session pooler** string); `postgres://` URLs are accepted. Tables are created on start, row level security is switched on for every table (so Supabase's public REST API cannot read them; only this backend can), and credentials go into their own `credentials` table in the same database (e-mail and name still encrypted). The whole backend test suite passes on PostgreSQL 16: `TEST_DATABASE_URL=postgresql://... pytest`. Uploaded floor plans and generated PDFs are still files on the server's disk.

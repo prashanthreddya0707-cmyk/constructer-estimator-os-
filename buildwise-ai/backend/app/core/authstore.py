@@ -15,10 +15,11 @@ import uuid
 from datetime import datetime, timezone
 
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import DateTime, String, create_engine, event
+from sqlalchemy import DateTime, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from app.core.config import get_settings
+from app.core.db import _make_engine, enable_rls
 
 
 class AuthBase(DeclarativeBase):
@@ -35,14 +36,7 @@ class Credential(AuthBase):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
-def _engine():
-    url = get_settings().auth_database_url
-    kwargs = {"connect_args": {"check_same_thread": False}} if url.startswith("sqlite") else {}
-    eng = create_engine(url, **kwargs)
-    return eng
-
-
-engine = _engine()
+engine = _make_engine(get_settings().auth_database_url)
 AuthSession = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
@@ -97,6 +91,7 @@ def profile(c: Credential) -> tuple[str, str]:
 
 def init_auth_db() -> None:
     AuthBase.metadata.create_all(bind=engine)
+    enable_rls(engine, AuthBase.metadata)
 
 
 def migrate_legacy_users() -> int:
