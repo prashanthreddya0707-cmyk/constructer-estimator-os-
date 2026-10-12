@@ -14,11 +14,11 @@ const Ctx = createContext<AuthCtx | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(() => !!tokenStore.get())
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setUnauthorizedHandler(() => setUser(null))
-    if (!tokenStore.get()) return
+    // the session cookie (if any) is sent automatically; no token is read from browser storage
     api.me().then(setUser).catch(() => tokenStore.clear()).finally(() => setLoading(false))
     return () => setUnauthorizedHandler(null)
   }, [])
@@ -33,7 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     tokenStore.set(r.access_token)
     setUser(r.user)
   }, [])
-  const logout = useCallback(() => { tokenStore.clear(); setUser(null) }, [])
+  const logout = useCallback(() => { tokenStore.clear(); setUser(null); api.logout().catch(() => { /* cookie expires on its own */ }) }, [])
 
   const value = useMemo(() => ({ user, loading, login, signup, logout, setUser }), [user, loading, login, signup, logout])
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

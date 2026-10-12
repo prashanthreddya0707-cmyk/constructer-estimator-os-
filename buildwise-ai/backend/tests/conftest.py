@@ -4,6 +4,8 @@ import tempfile
 _tmp = tempfile.mkdtemp(prefix="buildwise-test-")
 os.environ["DATA_DIR"] = _tmp
 os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
+os.environ["AUTH_DATABASE_URL"] = f"sqlite:///{_tmp}/auth.db"
+os.environ["AUTH_ENCRYPTION_KEY"] = "test-auth-key-not-for-production"
 os.environ["JWT_SECRET"] = "test-secret-not-for-production-0123456789abcdef"
 
 import pytest  # noqa: E402
@@ -26,6 +28,7 @@ def make_user(client):
     email = f"user{_counter['n']}@example.com"
     r = client.post("/api/auth/signup", json={"email": email, "full_name": "Test User", "password": "password123"})
     assert r.status_code == 201, r.text
+    client.cookies.clear()  # tests authenticate with explicit headers
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
 
 

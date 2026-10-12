@@ -107,9 +107,11 @@ The Vite dev server proxies `/api` to `http://localhost:8000`, so no CORS setup 
 
 ## Authentication: what is active
 
-Active locally (no extra setup): password hashing (scrypt, per-password salt), signed expiring bearer tokens, protected API routes and frontend routes, server-side ownership checks for all user data, timing-safe login for unknown e-mails, generic 404 for other users' resources.
+- **Session:** the server sets an **httpOnly, SameSite=Lax cookie** (`bw_session`, `Secure` over HTTPS) that page scripts cannot read. Nothing secret is kept in `localStorage`; the frontend holds a token only in memory for the current page. `POST /api/auth/logout` clears the cookie. The API also accepts `Authorization: Bearer` for tools and tests.
+- **Separate credential store:** users' credentials live in their own SQLite file, `data/auth.db`, apart from `buildwise.db`. The e-mail and name are **encrypted** (Fernet) with a key that is not in the file (`AUTH_ENCRYPTION_KEY`, or an auto-generated `data/.auth_key`); the e-mail is found through a keyed HMAC; the password is only a salted **scrypt** hash. The project database keeps only an opaque user id. Users from older databases are moved over automatically on start.
+- Also: signed expiring tokens, protected API and frontend routes, server-side ownership checks, timing-safe login for unknown e-mails, generic 404 for other users' resources.
 
-Needs deployment configuration: a strong `JWT_SECRET`, HTTPS, restricted `CORS_ORIGINS`, a production database, and (not implemented) e-mail verification, password reset, rate limiting / lockout, and token refresh/revocation. Tokens live in `localStorage` for simplicity; a hardened deployment should prefer httpOnly cookies.
+Needs deployment configuration: strong `JWT_SECRET` and `AUTH_ENCRYPTION_KEY` (keep the key safe: without it the encrypted fields cannot be read), HTTPS, restricted `CORS_ORIGINS`, a production database, and (not implemented) e-mail verification, password reset, rate limiting / lockout, and token revocation.
 
 ## Database
 

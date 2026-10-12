@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import auth, dashboard, floorplans, materials, projects, reports
 from app.core.config import get_settings
+from app.core.authstore import init_auth_db, migrate_legacy_users
 from app.core.db import SessionLocal, init_db
 from app.core.errors import install_error_handlers
 from app.services.pricing.seed import seed_sample_catalogue
@@ -15,6 +16,8 @@ from app.services.pricing.seed import seed_sample_catalogue
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    init_auth_db()
+    migrate_legacy_users()
     if get_settings().seed_sample_data:
         with SessionLocal() as db:
             seed_sample_catalogue(db)

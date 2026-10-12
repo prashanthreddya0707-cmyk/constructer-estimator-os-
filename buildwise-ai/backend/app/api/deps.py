@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
+from app.core.authstore import Credential, get_auth_db, profile
+from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.security import decode_token
 from app.models import FloorPlan, Project, Report, User
@@ -12,15 +14,22 @@ bearer = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
-    creds: HTTPAuthorizationCredentials | None = Depends(bearer), db: Session = Depends(get_db)
+    request: Request, creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+    db: Session = Depends(get_db), adb: Session = Depends(get_auth_db),
 ) -> User:
+    """Identify the caller from the Authorization header or the httpOnly session cookie."""
     unauth = HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated. Please log in.", headers={"WWW-Authenticate": "Bearer"})
-    if not creds:
+    token = creds.credentials if creds else request.cookies.get(get_settings().cookie_name)
+    if not token:
         raise unauth
-    uid = decode_token(creds.credentials)
+    uid = decode_token(token)
     user = db.get(User, uid) if uid else None
-    if not user:
+    cred = adb.get(Credential, uid) if user else None
+    if not user or not cred:
         raise unauth
+    # Detach before filling in the decrypted profile, so e-mail/name are never written back to the project database.
+    db.expunge(user)
+    user.email, user.full_name = profile(cred)
     return user
 
 
