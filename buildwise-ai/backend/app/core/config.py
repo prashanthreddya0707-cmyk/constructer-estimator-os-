@@ -24,13 +24,19 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 
+def normalize_db_url(url: str) -> str:
+    """Accept the plain postgres:// URLs that Supabase/Render hand out and use the psycopg 3 driver."""
+    for old in ("postgres://", "postgresql://"):
+        if url.startswith(old):
+            return "postgresql+psycopg://" + url[len(old):]
+    return url
+
+
 class Settings:
     def __init__(self) -> None:
         self.data_dir = Path(os.environ.get("DATA_DIR", BACKEND_DIR / "data"))
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.database_url = os.environ.get(
-            "DATABASE_URL", f"sqlite:///{self.data_dir / 'buildwise.db'}"
-        )
+        self.database_url = normalize_db_url(os.environ.get("DATABASE_URL") or f"sqlite:///{self.data_dir / 'buildwise.db'}")
         self.upload_dir = Path(os.environ.get("UPLOAD_DIR", self.data_dir / "uploads"))
         self.report_dir = Path(os.environ.get("REPORT_DIR", self.data_dir / "reports"))
         self.upload_dir.mkdir(parents=True, exist_ok=True)
@@ -43,7 +49,10 @@ class Settings:
         self.jwt_secret = os.environ.get("JWT_SECRET") or self._dev_secret()
         self.jwt_algorithm = "HS256"
         # Credentials live in their own database file, encrypted with a key kept outside that file.
-        self.auth_database_url = os.environ.get("AUTH_DATABASE_URL", f"sqlite:///{self.data_dir / 'auth.db'}")
+        # With a server database (PostgreSQL / Supabase) the credentials go into the same database server (own table);
+        # with the default SQLite setup they stay in their own file.
+        default_auth = f"sqlite:///{self.data_dir / 'auth.db'}" if self.database_url.startswith("sqlite") else self.database_url
+        self.auth_database_url = normalize_db_url(os.environ.get("AUTH_DATABASE_URL") or default_auth)
         self.auth_secret = os.environ.get("AUTH_ENCRYPTION_KEY") or self._dev_key(".auth_key")
         self.cookie_name = "bw_session"
 

@@ -3,8 +3,13 @@ import tempfile
 
 _tmp = tempfile.mkdtemp(prefix="buildwise-test-")
 os.environ["DATA_DIR"] = _tmp
-os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
-os.environ["AUTH_DATABASE_URL"] = f"sqlite:///{_tmp}/auth.db"
+# TEST_DATABASE_URL runs the whole suite against a server database (e.g. PostgreSQL); default is SQLite files in a temp dir
+if os.environ.get("TEST_DATABASE_URL"):
+    os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
+    os.environ.pop("AUTH_DATABASE_URL", None)
+else:
+    os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
+    os.environ["AUTH_DATABASE_URL"] = f"sqlite:///{_tmp}/auth.db"
 os.environ["AUTH_ENCRYPTION_KEY"] = "test-auth-key-not-for-production"
 os.environ["JWT_SECRET"] = "test-secret-not-for-production-0123456789abcdef"
 

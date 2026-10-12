@@ -14,6 +14,8 @@ def _make_engine(url: str):
     kwargs = {}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
+    else:  # server database behind a pooler: drop dead connections instead of failing the request
+        kwargs.update(pool_pre_ping=True, pool_recycle=300)
     engine = create_engine(url, **kwargs)
     if url.startswith("sqlite"):
 
@@ -53,8 +55,21 @@ def _ensure_columns() -> None:
                 conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {column} {ddl}'))
 
 
+def enable_rls(eng, metadata) -> None:
+    """Supabase publishes every table of the public schema through its REST API. Turning on row level security without any
+    policy closes that door: only this backend (database owner) can read the tables."""
+    if eng.dialect.name != "postgresql":
+        return
+    from sqlalchemy import text
+
+    with eng.begin() as conn:
+        for table in metadata.sorted_tables:
+            conn.execute(text(f'ALTER TABLE "{table.name}" ENABLE ROW LEVEL SECURITY'))
+
+
 def init_db() -> None:
     from app import models  # noqa: F401  (register tables)
 
     Base.metadata.create_all(bind=engine)
     _ensure_columns()
+    enable_rls(engine, Base.metadata)

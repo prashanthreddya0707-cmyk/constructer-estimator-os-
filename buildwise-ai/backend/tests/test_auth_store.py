@@ -35,6 +35,8 @@ def test_https_requests_get_secure_cookie(client):
 
 
 def test_credentials_are_encrypted_in_their_own_file(client):
+    if not get_settings().auth_database_url.startswith("sqlite"):
+        return _check_encrypted_in_server_db()
     path = Path(get_settings().data_dir) / "auth.db"
     assert path.is_file()
     raw = path.read_bytes()
@@ -45,6 +47,30 @@ def test_credentials_are_encrypted_in_their_own_file(client):
     with SessionLocal() as db:
         users = db.query(User).all()
         assert users and all(u.password_hash == "" and u.full_name == "" and u.email.endswith("@auth.invalid") for u in users)
+
+
+def _check_encrypted_in_server_db():
+    from sqlalchemy import text
+
+    from app.core.authstore import engine
+
+    with engine.connect() as c:
+        rows = c.execute(text("select email_enc, name_enc, password_hash from credentials")).fetchall()
+    assert rows and all(EMAIL not in r[0] and NAME not in r[1] and r[2].startswith("scrypt$") for r in rows)
+    with SessionLocal() as db:
+        assert all(u.password_hash == "" and u.full_name == "" for u in db.query(User).all())
+
+
+def test_server_database_blocks_public_api_with_rls(client):
+    from sqlalchemy import text
+
+    from app.core.db import engine as main_engine
+
+    if main_engine.dialect.name != "postgresql":
+        return
+    with main_engine.connect() as c:
+        off = c.execute(text("select relname from pg_class where relkind='r' and relnamespace='public'::regnamespace and not relrowsecurity")).fetchall()
+    assert off == []   # every table has row level security enabled
 
 
 def test_profile_update_stays_in_auth_store(client):
