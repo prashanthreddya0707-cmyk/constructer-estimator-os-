@@ -21,6 +21,8 @@ import tempfile
 import threading
 import time
 import urllib.request
+import uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import psutil
@@ -29,6 +31,8 @@ HERE = Path(__file__).resolve().parent
 BACKEND = HERE.parent / "backend"
 RESULTS = HERE / "results"
 PORT = 8010
+FAKE_STORAGE_PORT = 8011
+SB_URL = f"http://127.0.0.1:{FAKE_STORAGE_PORT}"   # stand-in Supabase project URL (storage only) for LOCAL Supabase-mode runs
 TARGET_ERROR_RATE = 1.0     # percent
 TARGET_P95_MS = 1500        # ms, aggregate of all requests
 
@@ -40,13 +44,81 @@ def http(method, path, body=None, headers=None):
         return json.loads(r.read() or b"null")
 
 
+
+_SB = {}
+
+
+def prepare_supabase_db(pg_url: str, n_users: int):
+    """LOCAL Supabase-like database: stand-ins for auth/storage + the real migration files, test users, long-lived test tokens."""
+    import jwt
+    import psycopg
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from jwt.algorithms import RSAAlgorithm
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    jwk = json.loads(RSAAlgorithm.to_jwk(key.public_key()))
+    jwk.update(kid="lt-key", alg="RS256", use="sig")
+    with psycopg.connect(pg_url, autocommit=True) as c:
+        for schema in ("public", "auth", "storage"):
+            c.execute(f"drop schema if exists {schema} cascade")
+        c.execute("create schema public")
+        c.execute((BACKEND / "tests" / "supabase" / "stubs.sql").read_text())
+        for f in sorted((HERE.parent / "supabase" / "migrations").glob("*.sql")):
+            c.execute(f.read_text())
+        users = []
+        now = int(time.time())
+        for i in range(n_users):
+            uid, email = str(uuid.uuid4()), f"lt{i}@example.com"
+            c.execute("insert into auth.users (id, email, raw_user_meta_data) values (%s, %s, %s::jsonb)", (uid, email, json.dumps({"full_name": f"Load Tester {i}"})))
+            tok = jwt.encode({"sub": uid, "email": email, "role": "authenticated", "aud": "authenticated", "iss": f"{SB_URL}/auth/v1", "iat": now,
+                              "exp": now + 4 * 3600, "user_metadata": {"full_name": f"Load Tester {i}"}}, key, algorithm="RS256", headers={"kid": "lt-key"})
+            users.append({"email": email, "token": tok})
+    _SB["jwks"] = json.dumps({"keys": [jwk]})
+    (RESULTS / "users.json").write_text(json.dumps(users))
+    return users
+
+
+class _FakeStorage(BaseHTTPRequestHandler):
+    """In-memory stand-in for Supabase Storage so PDF/report requests can run locally (measures our client, NOT real Supabase latency)."""
+    files: dict = {}
+
+    def log_message(self, *a):
+        pass
+
+    def _go(self, method):
+        n = int(self.headers.get("content-length") or 0)
+        body = self.rfile.read(n) if n else b""
+        path = self.path.split("/storage/v1/object/", 1)[-1].replace("authenticated/", "", 1)
+        ok = self.headers.get("Authorization", "").startswith("Bearer ") and self.headers.get("apikey")
+        code, out = (401, b"") if not ok else (200, b"")
+        if ok and method == "POST":
+            self.files[path] = body
+        elif ok and method == "DELETE":
+            self.files.pop(path, None)
+        elif ok and method in ("GET", "HEAD"):
+            code, out = (200, self.files[path]) if path in self.files else (404, b"")
+        self.send_response(code)
+        self.send_header("content-length", str(len(out) if method != "HEAD" else 0))
+        self.end_headers()
+        if method != "HEAD":
+            self.wfile.write(out)
+
+    do_POST = lambda s: s._go("POST")  # noqa: E731
+    do_GET = lambda s: s._go("GET")  # noqa: E731
+    do_HEAD = lambda s: s._go("HEAD")  # noqa: E731
+    do_DELETE = lambda s: s._go("DELETE")  # noqa: E731
+
+
 def start_server(args, data_dir):
     env = {**os.environ, "DATA_DIR": data_dir, "JWT_SECRET": "loadtest-secret-not-for-production-0123456789",
            "AUTH_ENCRYPTION_KEY": "loadtest-auth-key", "RATE_LIMIT_ENABLED": "false", "SEED_SAMPLE_DATA": "true"}
+    if args.auth == "supabase":
+        env.update(AUTH_PROVIDER="supabase", SUPABASE_URL=SB_URL, SUPABASE_PUBLISHABLE_KEY="sb_publishable_loadtest", SUPABASE_JWKS_JSON=_SB["jwks"], SEED_SAMPLE_DATA="true")
     if args.db == "postgres":
         env["DATABASE_URL"] = args.pg_url
     else:
         env.pop("DATABASE_URL", None)
+    env.update(DB_POOL_SIZE=str(args.pool_size), DB_MAX_OVERFLOW=str(args.pool_overflow))
     cmd = [str(BACKEND / ".venv/bin/uvicorn"), "app.main:app", "--port", str(PORT), "--workers", str(args.workers), "--log-level", "warning"]
     proc = subprocess.Popen(cmd, cwd=BACKEND, env=env, stdout=open(RESULTS / f"{args.tag}.server.log", "w"), stderr=subprocess.STDOUT)
     for _ in range(120):
@@ -59,7 +131,12 @@ def start_server(args, data_dir):
     raise SystemExit("server did not start")
 
 
-def seed_users(n):
+def seed_users(n, supabase=False):
+    if supabase:
+        users = json.loads((RESULTS / "users.json").read_text())
+        for u in users:
+            http("POST", "/api/demo/seed", headers={"Authorization": f"Bearer {u['token']}"})
+        return
     users = []
     for i in range(n):
         cred = {"email": f"lt{i}@example.com", "password": "LoadTest-pass-1"}
@@ -141,7 +218,10 @@ def main():
     ap.add_argument("--tag", required=True)
     ap.add_argument("--db", choices=["sqlite", "postgres"], default="sqlite")
     ap.add_argument("--pg-url", default="")
+    ap.add_argument("--auth", choices=["local", "supabase"], default="local", help="supabase = LOCAL Supabase-like database with RLS + JWT verification (needs --db postgres)")
     ap.add_argument("--workers", type=int, default=1)
+    ap.add_argument("--pool-size", type=int, default=10)
+    ap.add_argument("--pool-overflow", type=int, default=20)
     ap.add_argument("--levels", type=int, nargs="+", default=[10, 25, 50, 100])
     ap.add_argument("--duration", type=int, default=60)
     ap.add_argument("--spawn-rate", type=int, default=10)
@@ -150,16 +230,21 @@ def main():
     args = ap.parse_args()
     RESULTS.mkdir(exist_ok=True)
     data_dir = tempfile.mkdtemp(prefix="bw-load-")
-    if args.db == "postgres":
+    fake = None
+    if args.auth == "supabase":
+        assert args.db == "postgres", "--auth supabase needs --db postgres"
+        prepare_supabase_db(args.pg_url, max(args.levels))
+        fake = ThreadingHTTPServer(("127.0.0.1", FAKE_STORAGE_PORT), _FakeStorage)
+        threading.Thread(target=fake.serve_forever, daemon=True).start()
+    elif args.db == "postgres":
         import psycopg
-        base = args.pg_url
-        with psycopg.connect(base, autocommit=True) as c:  # fresh, empty schema for every run
+        with psycopg.connect(args.pg_url, autocommit=True) as c:  # fresh, empty schema for every run
             c.execute("drop schema public cascade")
             c.execute("create schema public")
     proc = start_server(args, data_dir)
     results = []
     try:
-        seed_users(max(args.levels))
+        seed_users(max(args.levels), supabase=args.auth == "supabase")
         for users in args.levels:
             sampler = Sampler(proc.pid, args.pg_url if args.db == "postgres" else None)
             sampler.start()
@@ -174,8 +259,10 @@ def main():
     finally:
         proc.terminate()
         proc.wait(timeout=30)
+        if fake:
+            fake.shutdown()
         shutil.rmtree(data_dir, ignore_errors=True)
-    meta = {"tag": args.tag, "db": args.db, "workers": args.workers, "think_time_s": [args.think_min, args.think_max], "targets": {"error_rate_pct": TARGET_ERROR_RATE, "p95_ms": TARGET_P95_MS},
+    meta = {"tag": args.tag, "db": args.db, "auth": args.auth, "workers": args.workers, "pool": [args.pool_size, args.pool_overflow], "duration_s": args.duration, "think_time_s": [args.think_min, args.think_max], "targets": {"error_rate_pct": TARGET_ERROR_RATE, "p95_ms": TARGET_P95_MS},
             "machine": {"cpus": psutil.cpu_count(), "ram_gb": round(psutil.virtual_memory().total / 2**30)}, "results": results}
     (RESULTS / f"{args.tag}.json").write_text(json.dumps(meta, indent=1))
     ok = [r["users"] for r in results if r["meets_targets"]]

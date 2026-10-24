@@ -9,3 +9,4 @@ backend/data/
 *.db
 .DS_Store
 *.log
+backups/

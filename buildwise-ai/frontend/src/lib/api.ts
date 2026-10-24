@@ -3,6 +3,7 @@ import type {
   Room, RoomInput, User, ProjectBase, ExtraCostConfig, DetectResult,
 } from '@/types'
 import type { SavedLayout } from '@/features/building-3d/layoutStore'
+import { accessToken, AUTH_PROVIDER, getSupabase } from '@/lib/supabase'
 
 const BASE = `${(import.meta.env.VITE_API_BASE_URL as string | undefined) ?? ''}/api`
 
@@ -31,7 +32,7 @@ export const setUnauthorizedHandler = (fn: Listener | null) => { onUnauthorized 
 
 async function raw(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers)
-  const token = tokenStore.get()
+  const token = AUTH_PROVIDER === 'supabase' ? await accessToken() : tokenStore.get()
   if (token) headers.set('Authorization', `Bearer ${token}`)
   if (init.body && !(init.body instanceof FormData) && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
   let res: Response
@@ -47,7 +48,11 @@ async function raw(path: string, init: RequestInit = {}): Promise<Response> {
       const body = await res.json()
       msg = body?.error?.message ?? body?.detail ?? msg
     } catch { /* non-JSON error */ }
-    if (res.status === 401 && !path.startsWith('/auth/')) { tokenStore.clear(); onUnauthorized?.() }
+    if (res.status === 401 && !path.startsWith('/auth/')) {
+      tokenStore.clear()
+      if (AUTH_PROVIDER === 'supabase') (await getSupabase()).auth.signOut().catch(() => {})
+      onUnauthorized?.()
+    }
     throw new ApiError(msg, res.status)
   }
   return res

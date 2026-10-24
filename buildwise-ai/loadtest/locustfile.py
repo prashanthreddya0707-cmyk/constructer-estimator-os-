@@ -36,6 +36,11 @@ class BuildWiseUser(HttpUser):
 
     def on_start(self):
         cred = USERS[next(_next) % len(USERS)]
+        if "token" in cred:   # Supabase mode: accounts and tokens are pre-created (no repeated sign-up / login against the auth service)
+            self.client.headers["Authorization"] = f"Bearer {cred['token']}"
+            self.client.get("/api/auth/me", name="GET /auth/me")
+            self.project_ids = [p["id"] for p in self.client.get("/api/projects", name="GET /projects").json()]
+            return
         with self.client.post("/api/auth/login", json=cred, name="POST /auth/login", catch_response=True) as r:
             if r.status_code != 200:
                 r.failure(f"login failed {r.status_code}")

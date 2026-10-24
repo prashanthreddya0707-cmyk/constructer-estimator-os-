@@ -22,70 +22,112 @@ grant select, insert, update, delete on
   to authenticated;
 grant select, insert, update on public.profiles to authenticated;
 
-drop policy if exists profiles_select on public.profiles;
-create policy profiles_select on public.profiles for select to authenticated using (id = (select auth.uid()));
-drop policy if exists profiles_insert on public.profiles;
-create policy profiles_insert on public.profiles for insert to authenticated with check (id = (select auth.uid()));
-drop policy if exists profiles_update on public.profiles;
-create policy profiles_update on public.profiles for update to authenticated
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'profiles' and policyname = 'profiles_select') then
+    create policy profiles_select on public.profiles for select to authenticated using (id = (select auth.uid()));
+  end if;
+end $$;
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'profiles' and policyname = 'profiles_insert') then
+    create policy profiles_insert on public.profiles for insert to authenticated with check (id = (select auth.uid()));
+  end if;
+end $$;
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'profiles' and policyname = 'profiles_update') then
+    create policy profiles_update on public.profiles for update to authenticated
   using (id = (select auth.uid())) with check (id = (select auth.uid()));
+  end if;
+end $$;
 
-drop policy if exists projects_own on public.projects;
-create policy projects_own on public.projects for all to authenticated
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'projects' and policyname = 'projects_own') then
+    create policy projects_own on public.projects for all to authenticated
   using (owner_id = (select auth.uid())) with check (owner_id = (select auth.uid()));
+  end if;
+end $$;
 
 -- Child rows: they must belong to the user AND hang under one of the user's own projects / estimates.
-drop policy if exists rooms_own on public.project_rooms;
-create policy rooms_own on public.project_rooms for all to authenticated
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'project_rooms' and policyname = 'rooms_own') then
+    create policy rooms_own on public.project_rooms for all to authenticated
   using (owner_id = (select auth.uid()))
   with check (owner_id = (select auth.uid())
               and exists (select 1 from public.projects p where p.id = project_id and p.owner_id = (select auth.uid())));
+  end if;
+end $$;
 
-drop policy if exists floorplans_own on public.floor_plan_files;
-create policy floorplans_own on public.floor_plan_files for all to authenticated
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'floor_plan_files' and policyname = 'floorplans_own') then
+    create policy floorplans_own on public.floor_plan_files for all to authenticated
   using (owner_id = (select auth.uid()))
   with check (owner_id = (select auth.uid())
               and exists (select 1 from public.projects p where p.id = project_id and p.owner_id = (select auth.uid())));
+  end if;
+end $$;
 
-drop policy if exists estimates_own on public.project_estimates;
-create policy estimates_own on public.project_estimates for all to authenticated
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'project_estimates' and policyname = 'estimates_own') then
+    create policy estimates_own on public.project_estimates for all to authenticated
   using (owner_id = (select auth.uid()))
   with check (owner_id = (select auth.uid())
               and exists (select 1 from public.projects p where p.id = project_id and p.owner_id = (select auth.uid())));
+  end if;
+end $$;
 
-drop policy if exists items_own on public.estimate_items;
-create policy items_own on public.estimate_items for all to authenticated
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'estimate_items' and policyname = 'items_own') then
+    create policy items_own on public.estimate_items for all to authenticated
   using (owner_id = (select auth.uid()))
   with check (owner_id = (select auth.uid())
               and exists (select 1 from public.project_estimates e where e.id = estimate_id and e.owner_id = (select auth.uid())));
+  end if;
+end $$;
 
-drop policy if exists recs_own on public.optimization_recommendations;
-create policy recs_own on public.optimization_recommendations for all to authenticated
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'optimization_recommendations' and policyname = 'recs_own') then
+    create policy recs_own on public.optimization_recommendations for all to authenticated
   using (owner_id = (select auth.uid()))
   with check (owner_id = (select auth.uid())
               and exists (select 1 from public.project_estimates e where e.id = estimate_id and e.owner_id = (select auth.uid())));
+  end if;
+end $$;
 
-drop policy if exists reports_own on public.reports;
-create policy reports_own on public.reports for all to authenticated
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'reports' and policyname = 'reports_own') then
+    create policy reports_own on public.reports for all to authenticated
   using (owner_id = (select auth.uid()))
   with check (owner_id = (select auth.uid())
               and exists (select 1 from public.projects p where p.id = project_id and p.owner_id = (select auth.uid())));
+  end if;
+end $$;
 
 -- Catalogue: shared sample rows (owner_id is null) are read-only; user rows are private and writable by the owner only.
-drop policy if exists materials_read on public.materials;
-create policy materials_read on public.materials for select to authenticated
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'materials' and policyname = 'materials_read') then
+    create policy materials_read on public.materials for select to authenticated
   using (owner_id is null or owner_id = (select auth.uid()));
-drop policy if exists materials_write on public.materials;
-create policy materials_write on public.materials for all to authenticated
+  end if;
+end $$;
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'materials' and policyname = 'materials_write') then
+    create policy materials_write on public.materials for all to authenticated
   using (owner_id = (select auth.uid())) with check (owner_id = (select auth.uid()));
+  end if;
+end $$;
 
-drop policy if exists prices_read on public.material_price_records;
-create policy prices_read on public.material_price_records for select to authenticated
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'material_price_records' and policyname = 'prices_read') then
+    create policy prices_read on public.material_price_records for select to authenticated
   using (owner_id is null or owner_id = (select auth.uid()));
-drop policy if exists prices_write on public.material_price_records;
-create policy prices_write on public.material_price_records for all to authenticated
+  end if;
+end $$;
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'material_price_records' and policyname = 'prices_write') then
+    create policy prices_write on public.material_price_records for all to authenticated
   using (owner_id = (select auth.uid()))
   with check (owner_id = (select auth.uid())
               and exists (select 1 from public.materials m
                           where m.id = material_id and (m.owner_id is null or m.owner_id = (select auth.uid()))));
+  end if;
+end $$;
 

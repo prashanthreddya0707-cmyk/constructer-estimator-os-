@@ -1,6 +1,6 @@
 -- BuildWise AI: database schema for Supabase (PostgreSQL), with Row Level Security.
 --
--- Additive and idempotent: only creates what is missing, never drops or rewrites data.
+-- Additive and idempotent: only creates what is missing; contains no destructive statements.
 -- Users live in Supabase Auth (auth.users); every user-owned row points at auth.users(id).
 -- The browser never touches these tables directly (the Data API can stay off): the FastAPI backend connects to the database,
 -- switches to the `authenticated` role for the signed-in user and sets that user's JWT claims, so the policies below apply to
@@ -48,8 +48,11 @@ create table if not exists public.projects (
   updated_at           timestamptz not null default now()
 );
 create index if not exists ix_projects_owner_updated on public.projects (owner_id, updated_at desc);
-drop trigger if exists trg_projects_touch on public.projects;
-create trigger trg_projects_touch before update on public.projects for each row execute function public.touch_updated_at();
+do $$ begin
+  if not exists (select 1 from pg_trigger where tgname = 'trg_projects_touch' and tgrelid = 'public.projects'::regclass) then
+    create trigger trg_projects_touch before update on public.projects for each row execute function public.touch_updated_at();
+  end if;
+end $$;
 
 create table if not exists public.project_rooms (
   id              uuid primary key default gen_random_uuid(),
@@ -122,8 +125,11 @@ create table if not exists public.material_price_records (
 );
 create index if not exists ix_prices_material on public.material_price_records (material_id);
 create index if not exists ix_prices_owner on public.material_price_records (owner_id);
-drop trigger if exists trg_prices_touch on public.material_price_records;
-create trigger trg_prices_touch before update on public.material_price_records for each row execute function public.touch_updated_at();
+do $$ begin
+  if not exists (select 1 from pg_trigger where tgname = 'trg_prices_touch' and tgrelid = 'public.material_price_records'::regclass) then
+    create trigger trg_prices_touch before update on public.material_price_records for each row execute function public.touch_updated_at();
+  end if;
+end $$;
 
 -- ============================================================================ estimates
 create table if not exists public.project_estimates (
