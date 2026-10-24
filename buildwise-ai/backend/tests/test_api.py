@@ -1,3 +1,4 @@
+import pytest
 import copy
 import io
 
@@ -18,6 +19,7 @@ def test_health(client):
     assert client.get("/api/health").json()["status"] == "ok"
 
 
+@pytest.mark.local_auth
 def test_auth_flow(client):
     r = client.post("/api/auth/signup", json={"email": "a@x.com", "full_name": "A", "password": "short"})
     assert r.status_code == 422

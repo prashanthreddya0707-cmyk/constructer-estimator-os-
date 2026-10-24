@@ -7,6 +7,10 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.models import User
 
+import pytest
+
+pytestmark = pytest.mark.local_auth   # these test the built-in credential store
+
 EMAIL, NAME, PW = "secret.person@example.com", "Secret Person", "correct-horse-1"
 
 
@@ -35,6 +39,8 @@ def test_https_requests_get_secure_cookie(client):
 
 
 def test_credentials_are_encrypted_in_their_own_file(client):
+    if not get_settings().auth_database_url.startswith("sqlite"):
+        return _check_encrypted_in_server_db()
     path = Path(get_settings().data_dir) / "auth.db"
     assert path.is_file()
     raw = path.read_bytes()
@@ -45,6 +51,30 @@ def test_credentials_are_encrypted_in_their_own_file(client):
     with SessionLocal() as db:
         users = db.query(User).all()
         assert users and all(u.password_hash == "" and u.full_name == "" and u.email.endswith("@auth.invalid") for u in users)
+
+
+def _check_encrypted_in_server_db():
+    from sqlalchemy import text
+
+    from app.core.authstore import engine
+
+    with engine.connect() as c:
+        rows = c.execute(text("select email_enc, name_enc, password_hash from credentials")).fetchall()
+    assert rows and all(EMAIL not in r[0] and NAME not in r[1] and r[2].startswith("scrypt$") for r in rows)
+    with SessionLocal() as db:
+        assert all(u.password_hash == "" and u.full_name == "" for u in db.query(User).all())
+
+
+def test_server_database_blocks_public_api_with_rls(client):
+    from sqlalchemy import text
+
+    from app.core.db import engine as main_engine
+
+    if main_engine.dialect.name != "postgresql":
+        return
+    with main_engine.connect() as c:
+        off = c.execute(text("select relname from pg_class where relkind='r' and relnamespace='public'::regnamespace and not relrowsecurity")).fetchall()
+    assert off == []   # every table has row level security enabled
 
 
 def test_profile_update_stays_in_auth_store(client):
@@ -59,14 +89,17 @@ def test_profile_update_stays_in_auth_store(client):
 
 
 def test_legacy_users_are_migrated_and_can_still_log_in(client):
+    import uuid
+
     from app.core.security import hash_password
 
+    legacy_id = str(uuid.uuid4())
     with SessionLocal() as db:
-        db.add(User(id="legacy-user-1", email="old.user@example.com", full_name="Old User", password_hash=hash_password("oldpassword1")))
+        db.add(User(id=legacy_id, email="old.user@example.com", full_name="Old User", password_hash=hash_password("oldpassword1")))
         db.commit()
     assert migrate_legacy_users() >= 1
     with SessionLocal() as db:
-        u = db.get(User, "legacy-user-1")
+        u = db.get(User, legacy_id)
         assert u.email.endswith("@auth.invalid") and u.password_hash == ""
     r = client.post("/api/auth/login", json={"email": "old.user@example.com", "password": "oldpassword1"})
     assert r.status_code == 200 and r.json()["user"]["full_name"] == "Old User"

@@ -1,4 +1,4 @@
-"""File storage abstraction. Only local disk is implemented; swap in S3/GCS by implementing the same interface."""
+"""File storage abstraction: local disk (default) or a private Supabase Storage bucket (AUTH_PROVIDER=supabase)."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -38,9 +38,17 @@ class LocalStorage:
         self._p(key).unlink(missing_ok=True)
 
 
-def upload_storage() -> LocalStorage:
+def upload_storage() -> Storage:
+    if get_settings().auth_provider == "supabase":
+        from app.core.supa import storage_for
+
+        return storage_for("floorplans")  # private Supabase bucket, one folder per user, Storage RLS
     return LocalStorage(get_settings().upload_dir)
 
 
-def report_storage() -> LocalStorage:
+def report_storage() -> Storage:
+    if get_settings().auth_provider == "supabase":
+        from app.core.supa import storage_for
+
+        return storage_for("reports")
     return LocalStorage(get_settings().report_dir)

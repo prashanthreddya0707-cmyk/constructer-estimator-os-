@@ -22,7 +22,7 @@ class SignupIn(BaseModel):
 
 class LoginIn(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=1, max_length=128)  # bounded before any password hashing happens
 
 
 class UserOut(ORM):

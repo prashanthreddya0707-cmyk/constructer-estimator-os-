@@ -35,17 +35,18 @@ def verify_password(password: str, stored: str) -> bool:
         return False
 
 
-def create_access_token(user_id: str) -> str:
+def create_access_token(user_id: str, version: int = 0) -> str:
     s = get_settings()
     now = datetime.now(timezone.utc)
-    payload = {"sub": user_id, "iat": now, "exp": now + timedelta(minutes=s.access_token_minutes)}
+    payload = {"sub": user_id, "ver": version, "iat": now, "exp": now + timedelta(minutes=s.access_token_minutes)}
     return jwt.encode(payload, s.jwt_secret, algorithm=s.jwt_algorithm)
 
 
-def decode_token(token: str) -> str | None:
+def decode_token(token: str) -> tuple[str, int] | None:
+    """(user id, token version) of a valid, unexpired token, else None. Tokens from before versions existed count as 0."""
     s = get_settings()
     try:
         data = jwt.decode(token, s.jwt_secret, algorithms=[s.jwt_algorithm])
-        return data.get("sub")
-    except jwt.PyJWTError:
+        return (data["sub"], int(data.get("ver", 0))) if data.get("sub") else None
+    except (jwt.PyJWTError, ValueError, TypeError):
         return None

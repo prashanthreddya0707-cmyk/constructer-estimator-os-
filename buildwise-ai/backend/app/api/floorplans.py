@@ -5,7 +5,7 @@ import uuid
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, get_owned_floorplan, get_owned_project
+from app.api.deps import get_current_user, get_owned_floorplan, get_owned_project, throttle_expensive
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.models import FloorPlan, Project, User
@@ -21,7 +21,7 @@ def list_floorplans(p: Project = Depends(get_owned_project)):
     return p.floorplans
 
 
-@router.post("/projects/{project_id}/floorplans", response_model=FloorPlanOut, status_code=201)
+@router.post("/projects/{project_id}/floorplans", response_model=FloorPlanOut, status_code=201, dependencies=[Depends(throttle_expensive)])
 async def upload_floorplan(file: UploadFile = File(...), p: Project = Depends(get_owned_project),
                            user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     max_bytes = get_settings().max_upload_mb * 1024 * 1024
@@ -65,7 +65,7 @@ def calibrate(body: CalibrationIn, fp: FloorPlan = Depends(get_owned_floorplan),
     return fp
 
 
-@router.post("/floorplans/{fid}/analyze")
+@router.post("/floorplans/{fid}/analyze", dependencies=[Depends(throttle_expensive)])
 def analyze(fp: FloorPlan = Depends(get_owned_floorplan)):
     """Optional OpenCV pre-processing. Returns a base64 overlay; a visual aid only."""
     import base64
@@ -85,7 +85,7 @@ def analyze(fp: FloorPlan = Depends(get_owned_floorplan)):
     }
 
 
-@router.post("/floorplans/{fid}/detect-rooms")
+@router.post("/floorplans/{fid}/detect-rooms", dependencies=[Depends(throttle_expensive)])
 def detect(fp: FloorPlan = Depends(get_owned_floorplan)):
     """Suggest room rectangles from the image. Heuristic: the user must review and confirm before anything is created."""
     import base64

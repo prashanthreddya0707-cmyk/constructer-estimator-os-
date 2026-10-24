@@ -174,3 +174,14 @@ Netlify serves only the static frontend; the FastAPI backend needs a Python host
 * Columns, beams and footings are not detailed; use the *frame concrete allowance* assumption and have an engineer design them.
 * No Alembic migrations, e-mail verification, password reset or rate limiting (see Authentication).
 * Dashboard "material quantities" combine different units on one chart (tooltips show units).
+
+## Supabase (optional, off by default)
+
+BuildWise can use **Supabase** for the PostgreSQL database, **Supabase Auth** (accounts, sessions) and private **Storage** (floor plans, PDFs), with Row Level Security on every table.
+It is switched on with `AUTH_PROVIDER=supabase` (backend) and `VITE_AUTH_PROVIDER=supabase` (frontend); until then the built-in login and SQLite/PostgreSQL behave exactly as before.
+Architecture, RLS policies, setup steps, backup/rollback and tests: **[`docs/SUPABASE.md`](docs/SUPABASE.md)**. Schema: `supabase/migrations/*.sql`.
+Earlier audit of the app and the measured load-test results: [`docs/AUDIT.md`](docs/AUDIT.md), [`docs/TECHNICAL_REPORT.md`](docs/TECHNICAL_REPORT.md).
+
+Without Supabase you can still point `DATABASE_URL` at any PostgreSQL server (`postgres://` URLs are accepted). Tables are then created on start with row level security switched on, and credentials go into their own `credentials` table (e-mail and name encrypted).
+Uploaded floor plans and generated PDFs are files on the server's disk in that setup (Supabase Storage replaces that when Supabase mode is on).
+

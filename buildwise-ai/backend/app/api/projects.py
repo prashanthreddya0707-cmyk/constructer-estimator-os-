@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from app.api.deps import get_current_user, get_owned_project
+from app.api.deps import get_current_user, get_owned_project, throttle_expensive
 from app.core.db import get_db
 from app.models import Estimate, Project, Room, User
 from app.schemas import (
@@ -48,7 +48,8 @@ def _validate_rooms_vs_floors(rooms, floors: int):
 
 @router.get("/projects", response_model=list[ProjectOut])
 def list_projects(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    ps = db.query(Project).filter(Project.owner_id == user.id).order_by(Project.updated_at.desc()).all()
+    ps = (db.query(Project).options(selectinload(Project.rooms), selectinload(Project.estimates))
+          .filter(Project.owner_id == user.id).order_by(Project.updated_at.desc()).all())
     return [project_out(p) for p in ps]
 
 
@@ -186,7 +187,7 @@ def reset_layout(p: Project = Depends(get_owned_project), db: Session = Depends(
 
 
 # ---- estimate -------------------------------------------------------------------------------
-@router.post("/projects/{project_id}/estimate")
+@router.post("/projects/{project_id}/estimate", dependencies=[Depends(throttle_expensive)])
 def run_estimate(body: EstimateRequest | None = None, p: Project = Depends(get_owned_project),
                  user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     body = body or EstimateRequest()

@@ -60,15 +60,20 @@ export function Signup() {
   const navigate = useNavigate()
   const toast = useToast()
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<z.infer<typeof signupSchema>>({ resolver: zodResolver(signupSchema) })
   if (user) return <Navigate to="/app" replace />
   return (
     <Shell title="Create your account" subtitle="Start estimating materials and costs in minutes." footer={<>Already registered? <Link className="font-medium text-orange-600 hover:underline" to="/login">Log in</Link></>}>
       <form className="space-y-4" onSubmit={handleSubmit(async (v) => {
         setError(null)
-        try { await signup(v.email, v.full_name, v.password); toast.success('Account created.'); navigate('/app', { replace: true }) } catch (e) { setError(e instanceof Error ? e.message : 'Signup failed.') }
+        try {
+          if (await signup(v.email, v.full_name, v.password) === 'confirm') { setNotice('Account created. Check your e-mail and click the confirmation link, then log in.'); return }
+          toast.success('Account created.'); navigate('/app', { replace: true })
+        } catch (e) { setError(e instanceof Error ? e.message : 'Signup failed.') }
       })}>
         {error && <Alert tone="error">{error}</Alert>}
+        {notice && <Alert tone="success">{notice}</Alert>}
         <Field label="Full name" error={errors.full_name?.message}><Input autoComplete="name" invalid={!!errors.full_name} {...register('full_name')} /></Field>
         <Field label="E-mail" error={errors.email?.message}><Input type="email" autoComplete="email" invalid={!!errors.email} {...register('email')} /></Field>
         <Field label="Password" error={errors.password?.message} hint="At least 8 characters."><Input type="password" autoComplete="new-password" invalid={!!errors.password} {...register('password')} /></Field>
