@@ -62,7 +62,9 @@ A deliberately weakened policy made the Row Level Security tests fail, so the te
 
 * **Nothing was run against the real Supabase project's auth or database from the test environment:** its network policy blocks `*.supabase.co`. Real sign-up, the live database connection and live Storage are therefore untested.
   The schema was applied with Supabase's own tooling and checked afterwards (tables, Row Level Security on, policies, buckets, advisors); the policy and token logic was tested on a local PostgreSQL that runs the **same migration files**.
-* A live Row Level Security check inside the real project (temporary users, rolled back) was prepared but needs a confirmation in the connector that did not arrive.
+* **Live Row Level Security check on the real BuildWise-AI project: done** (run by the project owner in the Supabase SQL editor; temporary users and rows, rolled back, afterwards the project again had 0 users/projects/rooms/profiles).
+  Result: a second user saw 0 rows of the first user's project, updated 0, deleted 0; attaching a room to it and creating a project in the other user's name were refused; the anonymous role was denied.
+  Not covered by it: the shared sample catalogue (the table was still empty, so that check was vacuous), real sign-up/login through Supabase Auth, and Storage.
 * **No load test against real Supabase or the deployed Render service** has been run (no staging project exists; the deployed host is a free 0.1-CPU instance and must not be stress-tested).
 
 ## 6. Load testing
