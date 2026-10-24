@@ -1,0 +1,337 @@
+{
+ "tag": "supabase-local-1w-high",
+ "db": "postgres",
+ "auth": "supabase",
+ "workers": 1,
+ "pool": [
+  10,
+  20
+ ],
+ "duration_s": 60,
+ "think_time_s": [
+  1.0,
+  3.0
+ ],
+ "targets": {
+  "error_rate_pct": 1.0,
+  "p95_ms": 1500
+ },
+ "machine": {
+  "cpus": 4,
+  "ram_gb": 16
+ },
+ "results": [
+  {
+   "users": 150,
+   "duration_s": 60,
+   "requests": 3401,
+   "failures": 0,
+   "error_rate_pct": 0.0,
+   "rps": 57.6,
+   "avg_ms": 700,
+   "median_ms": 640,
+   "p95_ms": 1700,
+   "p99_ms": 2200,
+   "max_ms": 2767,
+   "cpu_avg_pct": 110.1,
+   "cpu_max_pct": 135.6,
+   "rss_max_mb": 167,
+   "db_conns_max": 30,
+   "endpoints": {
+    "DELETE /projects/{id}": {
+     "n": 83,
+     "fail": 0,
+     "median": 780,
+     "p95": 1300,
+     "p99": 1500
+    },
+    "GET /auth/me": {
+     "n": 231,
+     "fail": 0,
+     "median": 230,
+     "p95": 1100,
+     "p99": 1300
+    },
+    "GET /dashboard": {
+     "n": 424,
+     "fail": 0,
+     "median": 590,
+     "p95": 1100,
+     "p99": 1400
+    },
+    "GET /materials": {
+     "n": 274,
+     "fail": 0,
+     "median": 1100,
+     "p95": 1600,
+     "p99": 2000
+    },
+    "GET /prices": {
+     "n": 271,
+     "fail": 0,
+     "median": 510,
+     "p95": 1100,
+     "p99": 1300
+    },
+    "GET /projects": {
+     "n": 567,
+     "fail": 0,
+     "median": 440,
+     "p95": 1100,
+     "p99": 1400
+    },
+    "GET /projects/{id}": {
+     "n": 519,
+     "fail": 0,
+     "median": 670,
+     "p95": 1300,
+     "p99": 1700
+    },
+    "GET /projects/{id}/estimate": {
+     "n": 554,
+     "fail": 0,
+     "median": 620,
+     "p95": 1200,
+     "p99": 1400
+    },
+    "GET /reports": {
+     "n": 147,
+     "fail": 0,
+     "median": 540,
+     "p95": 1200,
+     "p99": 1400
+    },
+    "POST /projects (create)": {
+     "n": 87,
+     "fail": 0,
+     "median": 840,
+     "p95": 1300,
+     "p99": 1400
+    },
+    "POST /projects/{id}/estimate (recalc)": {
+     "n": 171,
+     "fail": 0,
+     "median": 1700,
+     "p95": 2300,
+     "p99": 2500
+    },
+    "POST /projects/{id}/report (PDF)": {
+     "n": 73,
+     "fail": 0,
+     "median": 2000,
+     "p95": 2600,
+     "p99": 2800
+    }
+   },
+   "meets_targets": false
+  },
+  {
+   "users": 200,
+   "duration_s": 60,
+   "requests": 3252,
+   "failures": 0,
+   "error_rate_pct": 0.0,
+   "rps": 55.0,
+   "avg_ms": 1504,
+   "median_ms": 1600,
+   "p95_ms": 3000,
+   "p99_ms": 3600,
+   "max_ms": 4659,
+   "cpu_avg_pct": 112.3,
+   "cpu_max_pct": 130.6,
+   "rss_max_mb": 181,
+   "db_conns_max": 30,
+   "endpoints": {
+    "DELETE /projects/{id}": {
+     "n": 73,
+     "fail": 0,
+     "median": 1800,
+     "p95": 2700,
+     "p99": 2800
+    },
+    "GET /auth/me": {
+     "n": 282,
+     "fail": 0,
+     "median": 670,
+     "p95": 2100,
+     "p99": 2600
+    },
+    "GET /dashboard": {
+     "n": 408,
+     "fail": 0,
+     "median": 1500,
+     "p95": 2400,
+     "p99": 2700
+    },
+    "GET /materials": {
+     "n": 247,
+     "fail": 0,
+     "median": 2000,
+     "p95": 3000,
+     "p99": 3200
+    },
+    "GET /prices": {
+     "n": 241,
+     "fail": 0,
+     "median": 1600,
+     "p95": 2600,
+     "p99": 2900
+    },
+    "GET /projects": {
+     "n": 572,
+     "fail": 0,
+     "median": 1300,
+     "p95": 2500,
+     "p99": 3100
+    },
+    "GET /projects/{id}": {
+     "n": 449,
+     "fail": 0,
+     "median": 2000,
+     "p95": 3000,
+     "p99": 3500
+    },
+    "GET /projects/{id}/estimate": {
+     "n": 493,
+     "fail": 0,
+     "median": 1800,
+     "p95": 2700,
+     "p99": 3100
+    },
+    "GET /reports": {
+     "n": 148,
+     "fail": 0,
+     "median": 1500,
+     "p95": 2600,
+     "p99": 2900
+    },
+    "POST /projects (create)": {
+     "n": 80,
+     "fail": 0,
+     "median": 1600,
+     "p95": 2700,
+     "p99": 3300
+    },
+    "POST /projects/{id}/estimate (recalc)": {
+     "n": 172,
+     "fail": 0,
+     "median": 2700,
+     "p95": 3600,
+     "p99": 4100
+    },
+    "POST /projects/{id}/report (PDF)": {
+     "n": 87,
+     "fail": 0,
+     "median": 3000,
+     "p95": 4200,
+     "p99": 4700
+    }
+   },
+   "meets_targets": false
+  },
+  {
+   "users": 300,
+   "duration_s": 60,
+   "requests": 1581,
+   "failures": 81,
+   "error_rate_pct": 5.12,
+   "rps": 28.3,
+   "avg_ms": 2891,
+   "median_ms": 920,
+   "p95_ms": 13000,
+   "p99_ms": 30000,
+   "max_ms": 31779,
+   "cpu_avg_pct": 48.7,
+   "cpu_max_pct": 129.7,
+   "rss_max_mb": 188,
+   "db_conns_max": 30,
+   "endpoints": {
+    "DELETE /projects/{id}": {
+     "n": 34,
+     "fail": 0,
+     "median": 340,
+     "p95": 12000,
+     "p99": 12000
+    },
+    "GET /auth/me": {
+     "n": 295,
+     "fail": 19,
+     "median": 580,
+     "p95": 21000,
+     "p99": 30000
+    },
+    "GET /dashboard": {
+     "n": 139,
+     "fail": 11,
+     "median": 940,
+     "p95": 21000,
+     "p99": 30000
+    },
+    "GET /materials": {
+     "n": 87,
+     "fail": 6,
+     "median": 1200,
+     "p95": 20000,
+     "p99": 30000
+    },
+    "GET /prices": {
+     "n": 76,
+     "fail": 0,
+     "median": 710,
+     "p95": 12000,
+     "p99": 12000
+    },
+    "GET /projects": {
+     "n": 390,
+     "fail": 15,
+     "median": 650,
+     "p95": 12000,
+     "p99": 30000
+    },
+    "GET /projects/{id}": {
+     "n": 171,
+     "fail": 13,
+     "median": 1100,
+     "p95": 21000,
+     "p99": 30000
+    },
+    "GET /projects/{id}/estimate": {
+     "n": 186,
+     "fail": 8,
+     "median": 1100,
+     "p95": 12000,
+     "p99": 30000
+    },
+    "GET /reports": {
+     "n": 64,
+     "fail": 6,
+     "median": 890,
+     "p95": 30000,
+     "p99": 30000
+    },
+    "POST /projects (create)": {
+     "n": 39,
+     "fail": 1,
+     "median": 710,
+     "p95": 22000,
+     "p99": 30000
+    },
+    "POST /projects/{id}/estimate (recalc)": {
+     "n": 69,
+     "fail": 2,
+     "median": 2100,
+     "p95": 13000,
+     "p99": 32000
+    },
+    "POST /projects/{id}/report (PDF)": {
+     "n": 31,
+     "fail": 0,
+     "median": 1800,
+     "p95": 4100,
+     "p99": 13000
+    }
+   },
+   "meets_targets": false
+  }
+ ]
+}

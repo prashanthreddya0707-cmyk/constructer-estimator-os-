@@ -109,7 +109,24 @@ Single backend process unless stated. "Before" = the code before this work, "aft
 | | 50 | 29.1 | 15 ms | 110 ms | 230 ms | 0 % | 112 % | 290 MB | 20 |
 | | 100 | 55.0 | 21 ms | 170 ms | 300 ms | 0 % | 169 % | 315 MB | 22 |
 
-HIGHER_LOAD_PLACEHOLDER
+### Higher load: where it stops meeting the targets (Supabase mode, local PostgreSQL)
+
+| Processes | Users | Req/s | Median | p95 | p99 | Errors | Server CPU max | Meets targets? |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 100 (above) | 51.8 | 98 ms | 510 ms | 920 ms | 0 % | 126 % | yes |
+| 1 | 150 | 57.6 | 640 ms | 1700 ms | 2200 ms | 0 % | 136 % | **no** (p95 above 1500 ms) |
+| 1 | 200 | 55.0 | 1600 ms | 3000 ms | 3600 ms | 0 % | 131 % | no |
+| 1 | 300 | 28.3 | 920 ms | 13000 ms | 30000 ms | **5.1 %** | 130 % | no (requests time out) |
+| 2 | 100 (above) | 55.0 | 21 ms | 170 ms | 300 ms | 0 % | 169 % | yes |
+| 2 | 150 | 77.8 | 33 ms | 240 ms | 480 ms | 0 % | 191 % | yes |
+| 2 | 200 | 94.2 | 110 ms | 570 ms | 970 ms | 0.05 % | 205 % | yes |
+| 2 | 300 | 89.2 | 890 ms | 2500 ms | 3400 ms | 0.04 % | 218 % | **no** (p95 above 1500 ms) |
+
+* **One process:** throughput stops growing at about 55–58 requests/s (the process is saturated: the extra users only wait longer). Beyond about 200 users requests start to time out (5 % errors at 300). The slowest calls under overload are the PDF report, the estimate recalculation and the catalogue list.
+* **Two processes:** throughput rises to about 90 requests/s and the targets are still met at 200 users; at 300 users latency grows (p95 2.5 s) but almost nothing fails.
+* **Highest tested level that met the targets (error rate ≤ 1 %, p95 ≤ 1.5 s): 100 users with one process, 200 users with two processes** on the test machine. These are *tested* levels, **not the maximum capacity**: the limit lies between 100 and 150 (one process) and between 200 and 300 (two processes), at the 50/100-user resolution of these runs.
+* Caveat: Locust, the backend processes and PostgreSQL shared the same 4 CPUs, so the machine itself was close to saturation at the top levels; with the load generator on another machine the limits could be higher. The figures were measured once per level.
+
 
 ### How to read this
 * **Up to 50 users** every setup answers in about 10–25 ms (median) with 0 % errors. Throughput grows in step with the number of users because users pause between actions: the server is not the limit.
@@ -120,8 +137,8 @@ HIGHER_LOAD_PLACEHOLDER
 * "DB conns" of 60 in the PostgreSQL "after" run equals two pools of 30 (10 + 20 overflow each: application data and the built-in credential store, which uses its own pool), i.e. both at their maximum. This is an inference from the configuration, not a separate measurement. Supabase mode needs only the first pool.
 
 ### Answer to "how many users can use BuildWise at the same time?"
-* **Measured:** on the test machine, one backend process served **100 simultaneous active users** with 0 % errors and p95 of 0.5–1.4 s depending on setup; two processes served 100 users with p95 170 ms.
-  The highest level tested in the main series that met the targets was **100 virtual users**; see the higher-load section for what happened beyond that.
+* **Measured, on the test machine** (active users who act every 1–3 s): one backend process met the targets up to **100 simultaneous users** and failed them at 150; two backend processes met them up to **200 simultaneous users** and failed them at 300.
+  These are the highest *tested* levels that met the targets (not the absolute maximum; see the higher-load table for what happens beyond).
 * **Not measured:** the capacity of the deployed Render free instance, of real Supabase over the internet, or of any setup with more than two processes. Do not quote the numbers above as the capacity of the deployed site.
 * *Estimate (not a measurement):* because the limit is CPU in the Python process, more processes or a bigger instance should raise it roughly in proportion until the database becomes the limit. This should be verified with the same scripts.
 
