@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone
 
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import DateTime, String
+from sqlalchemy import DateTime, Integer, String, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from app.core.config import get_settings
@@ -33,6 +33,8 @@ class Credential(AuthBase):
     email_enc: Mapped[str] = mapped_column(String(600))
     name_enc: Mapped[str] = mapped_column(String(600))
     password_hash: Mapped[str] = mapped_column(String(255))
+    # bumped by logout: tokens carry the version they were issued with, older ones are rejected (server-side invalidation)
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
@@ -91,7 +93,17 @@ def profile(c: Credential) -> tuple[str, str]:
 
 def init_auth_db() -> None:
     AuthBase.metadata.create_all(bind=engine)
+    if "token_version" not in {c["name"] for c in inspect(engine).get_columns("credentials")}:  # credential store of an earlier release
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE credentials ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0"))
     enable_rls(engine, AuthBase.metadata)
+
+
+def bump_token_version(db: Session, user_id: str) -> None:
+    c = db.get(Credential, user_id)
+    if c:
+        c.token_version = (c.token_version or 0) + 1
+        db.commit()
 
 
 def migrate_legacy_users() -> int:

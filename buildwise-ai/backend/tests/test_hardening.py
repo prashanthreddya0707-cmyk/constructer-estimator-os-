@@ -41,6 +41,7 @@ def _signup(client, email, pw="password123"):
 
 
 # ---- authentication -------------------------------------------------------------------------------------------------
+@pytest.mark.local_auth
 def test_wrong_password_is_rejected_and_message_does_not_leak(client):
     _signup(client, "leak@example.com")
     client.cookies.clear()
@@ -49,11 +50,13 @@ def test_wrong_password_is_rejected_and_message_does_not_leak(client):
     assert a.status_code == b.status_code == 401 and a.json()["error"]["message"] == b.json()["error"]["message"]
 
 
+@pytest.mark.local_auth
 def test_login_rejects_giant_passwords_before_hashing(client):
     r = client.post("/api/auth/login", json={"email": "a@example.com", "password": "x" * 100_000})
     assert r.status_code == 422
 
 
+@pytest.mark.local_auth
 def test_logout_invalidates_the_token_on_the_server(client):
     _signup(client, "logout@example.com")
     client.cookies.clear()
@@ -77,6 +80,7 @@ def test_tampered_or_foreign_tokens_are_rejected(client):
 
 
 # ---- rate limiting -------------------------------------------------------------------------------------------------
+@pytest.mark.local_auth
 def test_failed_logins_are_throttled_per_account(client, limits):
     _signup(client, "brute@example.com")
     client.cookies.clear()
@@ -91,6 +95,7 @@ def test_failed_logins_are_throttled_per_account(client, limits):
     client.cookies.clear()
 
 
+@pytest.mark.local_auth
 def test_signup_is_throttled_per_ip(client, limits):
     codes = [_signup(client, f"flood{i}@example.com").status_code for i in range(5)]
     assert codes[:3] == [201, 201, 201] and set(codes[3:]) == {429}
@@ -106,16 +111,17 @@ def test_expensive_endpoints_are_throttled_per_user_not_per_ip(client, limits):
     assert client.post(f"/api/projects/{q['id']}/estimate", json={}, headers=b).status_code == 200   # other user unaffected
 
 
+@pytest.mark.local_auth
 def test_forwarded_ip_is_only_trusted_when_configured(client, limits):
-    limits.trust_proxy_headers = False
-    for i in range(3):
-        _signup(client, f"spoof{i}@example.com")
-    r = _signup(client, "spoof-x@example.com")
-    assert r.status_code == 429
+    limits.trust_proxy_headers = False                      # spoofed header is ignored: same caller, so the 4th sign-up is refused
+    codes = [client.post("/api/auth/signup", json={"email": f"sp{i}@example.com", "full_name": "T", "password": "password123"},
+                         headers={"X-Forwarded-For": f"9.9.9.{i}"}).status_code for i in range(4)]
+    assert codes == [201, 201, 201, 429]
     limiter.clear()
-    limits.trust_proxy_headers = True
-    for ip in ("1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4"):
-        assert _signup(client, f"fwd-{ip}@example.com").__class__ and True
+    limits.trust_proxy_headers = True                       # behind a trusted proxy each real client address counts separately
+    codes = [client.post("/api/auth/signup", json={"email": f"fw{i}@example.com", "full_name": "T", "password": "password123"},
+                         headers={"X-Forwarded-For": f"8.8.8.{i}, 10.0.0.1"}).status_code for i in range(4)]
+    assert codes == [201] * 4
     limits.trust_proxy_headers = False
     client.cookies.clear()
 
@@ -193,14 +199,19 @@ def test_input_validation_and_integrity_errors_are_clean(client):
     assert client.post("/api/projects", json={"name": "x"}, headers=h).status_code == 422
     assert client.post("/api/projects", content=b"{not json", headers={**h, "content-type": "application/json"}).status_code == 422
     # the database itself refuses rows that break the rules, even if the API were bypassed
+    users = "auth.users" if os.environ.get("TEST_AUTH_PROVIDER") == "supabase" else "users"
+    uid = make_user(client) and None  # make sure at least one account exists
     with SessionLocal() as db:
+        owner = db.execute(text(f"select id from {users} limit 1")).scalar()
         with pytest.raises(IntegrityError):
             db.execute(text("insert into projects (id, owner_id, name, floors, length, width, height, wall_thickness, slab_thickness, description, owner_name, building_type, location, currency, assumptions, wastage, material_selections, extra_costs, purchase_quantities, is_demo, created_at, updated_at) "
-                            "values ('c1', (select id from users limit 1), 'bad', 0, 10, 8, 3, 0.23, 0.15, '', '', 'residential', '', 'INR', '{}', '{}', '{}', '{}', '{}', false, current_timestamp, current_timestamp)"))
+                            "values (:id, :o, 'bad', 0, 10, 8, 3, 0.23, 0.15, '', '', 'residential', '', 'INR', '{}', '{}', '{}', '{}', '{}', false, current_timestamp, current_timestamp)"),
+                       {"id": str(__import__("uuid").uuid4()), "o": owner})
             db.commit()
 
 
 # ---- concurrency ----------------------------------------------------------------------------------------------------------
+@pytest.mark.local_auth
 def test_simultaneous_signups_for_one_email_create_exactly_one_account(client):
     def go(_):
         return client.post("/api/auth/signup", json={"email": "race@example.com", "full_name": "R", "password": "password123"}).status_code
@@ -256,6 +267,7 @@ def _call(port, method, path, body=None, token=None):
 
 
 @pytest.mark.skipif(bool(os.environ.get("TEST_DATABASE_URL")), reason="restart test uses its own SQLite files")
+@pytest.mark.local_auth
 def test_accounts_and_projects_survive_a_backend_restart(tmp_path):
     port = 8765
     proc = _start(str(tmp_path), port)

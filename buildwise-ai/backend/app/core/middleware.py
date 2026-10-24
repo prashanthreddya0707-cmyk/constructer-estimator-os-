@@ -6,6 +6,7 @@ import logging
 import time
 
 from app.core.config import get_settings
+from app.core.supa import request_token
 
 log = logging.getLogger("buildwise.request")
 JSON_LIMIT = 2 * 1024 * 1024  # JSON bodies are small; uploads have their own, larger limit
@@ -30,6 +31,9 @@ class HardeningMiddleware:
             body = json.dumps({"error": {"code": "payload_too_large", "message": "The request is too large.", "details": None}}).encode()
             await send({"type": "http.response.start", "status": 413, "headers": self._headers([(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())], headers)})
             return await send({"type": "http.response.body", "body": body})
+
+        auth = headers.get("authorization", "")
+        request_token.set(auth[7:] if auth[:7].lower() == "bearer " else None)  # lets Supabase Storage calls act as this user
 
         start = time.perf_counter()
         status = {"code": 0}

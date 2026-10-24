@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import datetime, timezone
 
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.models import Estimate, EstimateItemRow, Project, Recommendation
@@ -64,10 +65,14 @@ def compute_estimate(db: Session, user_id: str, p: Project, overrides: dict | No
 
 
 def save_estimate(db: Session, user_id: str, p: Project, payload: dict) -> Estimate:
-    """Persist as the project's current estimate (replaces the previous one)."""
-    for old in list(p.estimates):
-        db.delete(old)
-    db.flush()
+    """Persist as the project's current estimate (replaces the previous one) in ONE transaction.
+
+    The project row is locked first (PostgreSQL), so two simultaneous recalculations queue up instead of both inserting;
+    the old estimate is removed with a single DELETE (rows below it go through ON DELETE CASCADE).
+    """
+    db.execute(select(Project.id).where(Project.id == p.id).with_for_update())
+    db.execute(delete(Estimate).where(Estimate.project_id == p.id))
+    db.expire(p, ["estimates"])
     est = Estimate(
         project_id=p.id, owner_id=user_id, summary=payload["summary"], geometry=payload["geometry"],
         assumptions=payload["assumptions"], warnings=payload["warnings"],

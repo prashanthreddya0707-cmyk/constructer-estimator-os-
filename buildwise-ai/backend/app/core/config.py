@@ -56,6 +56,32 @@ class Settings:
         self.auth_secret = os.environ.get("AUTH_ENCRYPTION_KEY") or self._dev_key(".auth_key")
         self.cookie_name = "bw_session"
 
+        # ---- authentication provider switch: "local" (default, the existing app) or "supabase" -------------------------
+        self.auth_provider = os.environ.get("AUTH_PROVIDER", "local").strip().lower()
+        if self.auth_provider not in ("local", "supabase"):
+            raise RuntimeError("AUTH_PROVIDER must be 'local' or 'supabase'")
+        self.supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        self.supabase_publishable_key = os.environ.get("SUPABASE_PUBLISHABLE_KEY", "")   # public key; never the service-role key
+        self.supabase_jwks_json = os.environ.get("SUPABASE_JWKS_JSON", "")               # optional: pinned signing keys (tests/offline)
+        self.supabase_jwt_secret = os.environ.get("SUPABASE_JWT_SECRET", "")             # only for legacy HS256 projects
+        if self.auth_provider == "supabase" and not (self.supabase_url or self.supabase_jwks_json):
+            raise RuntimeError("AUTH_PROVIDER=supabase needs SUPABASE_URL (and DATABASE_URL pointing at the Supabase database)")
+
+        # ---- abuse protection and robustness ---------------------------------------------------------------------------
+        flag = lambda name, default: os.environ.get(name, default).lower() in ("1", "true", "yes", "on")  # noqa: E731
+        self.rate_limit_enabled = flag("RATE_LIMIT_ENABLED", "true")
+        self.login_ip_limit = int(os.environ.get("LOGIN_IP_LIMIT", "30"))          # login attempts / IP / 5 min
+        self.login_fail_limit = int(os.environ.get("LOGIN_FAIL_LIMIT", "8"))       # failed logins / (account, IP) / 15 min
+        self.signup_ip_limit = int(os.environ.get("SIGNUP_IP_LIMIT", "20"))        # sign-ups / IP / hour
+        self.expensive_user_limit = int(os.environ.get("EXPENSIVE_USER_LIMIT", "40"))  # PDFs, recalculations, plan analysis / user / min
+        self.trust_proxy_headers = flag("TRUST_PROXY_HEADERS", "false")
+        self.hsts = flag("HSTS", "false")
+        self.slow_request_ms = int(os.environ.get("SLOW_REQUEST_MS", "1000"))
+        self.db_pool_size = int(os.environ.get("DB_POOL_SIZE", "10"))
+        self.db_max_overflow = int(os.environ.get("DB_MAX_OVERFLOW", "20"))
+        self.db_pool_timeout = int(os.environ.get("DB_POOL_TIMEOUT", "10"))
+        self.db_statement_timeout_ms = int(os.environ.get("DB_STATEMENT_TIMEOUT_MS", "15000"))
+
     def _dev_secret(self) -> str:
         """No JWT_SECRET configured: generate one and keep it in the (git-ignored) data dir."""
         return self._dev_key(".dev_jwt_secret")

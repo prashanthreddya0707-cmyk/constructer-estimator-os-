@@ -7,6 +7,10 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.models import User
 
+import pytest
+
+pytestmark = pytest.mark.local_auth   # these test the built-in credential store
+
 EMAIL, NAME, PW = "secret.person@example.com", "Secret Person", "correct-horse-1"
 
 
@@ -85,14 +89,17 @@ def test_profile_update_stays_in_auth_store(client):
 
 
 def test_legacy_users_are_migrated_and_can_still_log_in(client):
+    import uuid
+
     from app.core.security import hash_password
 
+    legacy_id = str(uuid.uuid4())
     with SessionLocal() as db:
-        db.add(User(id="legacy-user-1", email="old.user@example.com", full_name="Old User", password_hash=hash_password("oldpassword1")))
+        db.add(User(id=legacy_id, email="old.user@example.com", full_name="Old User", password_hash=hash_password("oldpassword1")))
         db.commit()
     assert migrate_legacy_users() >= 1
     with SessionLocal() as db:
-        u = db.get(User, "legacy-user-1")
+        u = db.get(User, legacy_id)
         assert u.email.endswith("@auth.invalid") and u.password_hash == ""
     r = client.post("/api/auth/login", json={"email": "old.user@example.com", "password": "oldpassword1"})
     assert r.status_code == 200 and r.json()["user"]["full_name"] == "Old User"

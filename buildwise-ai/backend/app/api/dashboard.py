@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.deps import get_current_user
 from app.api.projects import _latest, project_out
 from app.core.db import get_db
-from app.models import Project, Report, Room, User
+from app.models import Estimate, Project, Report, Room
 from app.schemas import ReportOut
 from app.services.estimate_service import compute_estimate, save_estimate
 
@@ -23,7 +23,7 @@ DEMO_ROOMS = [
 
 
 @router.post("/demo/seed", status_code=201)
-def seed_demo(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def seed_demo(user=Depends(get_current_user), db: Session = Depends(get_db)):
     """Create a clearly-labelled demo project (is_demo=true) for exploring the app."""
     p = Project(owner_id=user.id, name="DEMO – Two-storey residence", description="Demonstration data. Dimensions are illustrative only.",
                 owner_name=user.full_name, building_type="residential", location="Demo location", floors=2, currency="INR",
@@ -39,8 +39,9 @@ def seed_demo(user: User = Depends(get_current_user), db: Session = Depends(get_
 
 
 @router.get("/dashboard")
-def dashboard(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    projects = db.query(Project).filter(Project.owner_id == user.id).order_by(Project.updated_at.desc()).all()
+def dashboard(user=Depends(get_current_user), db: Session = Depends(get_db)):
+    projects = (db.query(Project).options(selectinload(Project.rooms), selectinload(Project.estimates).selectinload(Estimate.items))
+                .filter(Project.owner_id == user.id).order_by(Project.updated_at.desc()).all())
     ests = [(p, _latest(p)) for p in projects if _latest(p)]
     cat: dict[str, float] = {}
     qty: dict[str, dict] = {}
